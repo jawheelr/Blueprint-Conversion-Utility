@@ -760,3 +760,19 @@ Administrators are responsible for reviewing generated Blueprints, deployment ta
 > ⚠️ **The creator/owner is not responsible for disruptions to your environment resulting from the use of Blueprint Conversion Utility.**
 
 Use **Dry Run** and nonproduction testing whenever practical, and verify Blueprint deployment before removing an existing Configuration Profile from scope.
+
+---
+
+# 🙌 Special Thanks
+
+A special shoutout and sincere thanks to **Neil Martin**:
+
+👉 **[github.com/neilmartin83](https://github.com/neilmartin83)**
+
+for his help and assistance with **`jamf-cli`**.
+
+His knowledge, feedback, and assistance with `jamf-cli` helped make its integration into Blueprint Conversion Utility possible and contributed to BCU's ability to provide administrators with better analysis and guidance when evaluating Configuration Profiles for migration to Jamf Platform Blueprints.
+
+**Thank you, Neil!** 🎉
+
+---
