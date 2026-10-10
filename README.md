@@ -64,6 +64,9 @@ BCU provides a guided workflow that generally follows these steps:
 
 ---
 
+> 🔑 **Jamf Platform API Setup**  
+> Follow the [Jamf Platform API Setup Guide](https://github.com/jawheelr/Blueprint-Conversion-Utility/blob/dad0c1789ea5e3f266275aef798040835e7153c8/PlatformAPISetup.md) to gather the API credentials and Platform Environment information required by BCU.
+
 # 🔌 Connecting to Jamf
 
 BCU requires access to the Jamf APIs used by the application's analysis and Blueprint-management workflows.
