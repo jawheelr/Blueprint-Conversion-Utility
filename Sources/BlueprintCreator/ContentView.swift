@@ -11,6 +11,14 @@ struct ContentView: View {
             : model.profiles.filter { $0.name.localizedCaseInsensitiveContains(search) }
     }
 
+    private var unscopeMessage: String {
+        guard let profile = model.selectedProfile else { return "No profile selected." }
+        return "Profile: \(profile.name) (ID \(profile.id))\n" +
+            "Current scope: \(profile.scope.summary)\n\n" +
+            "The blueprint is created and distributed first. Only if Jamf then reports it as DEPLOYED will every target be removed from this profile, which can stop managed devices from receiving it. " +
+            "The original scope is saved to ~/Library/Application Support/Blueprint Conversion Utility/Scope Backups."
+    }
+
     var body: some View {
         NavigationSplitView {
             sidebar
@@ -80,11 +88,12 @@ struct ContentView: View {
         .sheet(isPresented: $model.showUpdateAvailable) {
             UpdateAvailableView().environmentObject(model)
         }
-        .confirmationDialog("Configuration Profile Distribution", isPresented: $model.showSourceDispositionPrompt, titleVisibility: .visible) {
-            Button("Distribute Removal to All Previously Assigned Devices") { model.confirmSourceDisposition(.distributeToAll) }
-            Button("Apply Removal to Newly Assigned Devices Only") { model.confirmSourceDisposition(.doNotDistribute) }
-            Button("Cancel", role: .cancel) { model.pendingDistributionChoice = nil }
-        } message: { Text("Both choices remove every device and group from the source profile. The selection controls Jamf redistribution behavior for the saved removal.") }
+        .confirmationDialog("Unscope Configuration Profile?", isPresented: $model.showUnscopeConfirmation, titleVisibility: .visible) {
+            Button("Create, Distribute and Unscope", role: .destructive) { model.confirmUnscope() }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text(unscopeMessage)
+        }
         .alert(item: $model.operationResult) { result in Alert(title: Text(result.title), message: Text(result.details), dismissButton: .default(Text("OK"))) }
         .alert(
             "Blueprint Conversion Utility",

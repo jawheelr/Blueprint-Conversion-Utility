@@ -19,8 +19,11 @@ final class ProfileListParser: NSObject, XMLParserDelegate {
             throw parser.parserError ?? AppFailure.message("Unable to parse the Platform profile list.")
         }
         if results.isEmpty {
-            let preview = String(data: data.prefix(800), encoding: .utf8) ?? "Unreadable response"
-            throw AppFailure.message("Platform profile gateway returned zero readable profiles. Response: \(preview)")
+            // An empty list is valid; anything without a <size> element is not
+            // a recognizable profile listing.
+            guard String(decoding: data.prefix(4096), as: UTF8.self).contains("<size>") else {
+                throw AppFailure.message("Platform profile gateway returned an unrecognized response.")
+            }
         }
         return results.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
@@ -70,6 +73,7 @@ final class ProfileDetailParser: NSObject, XMLParserDelegate {
     private var deviceCount = 0
     private var limitationCount = 0
     private var exclusionCount = 0
+    private var otherTargetCount = 0
     private var allDevices = false
 
     func parse(_ data: Data, base: JamfProfile) throws -> JamfProfile {
@@ -85,7 +89,8 @@ final class ProfileDetailParser: NSObject, XMLParserDelegate {
             groupNames: Array(Set(groupNames)).sorted(),
             individualDeviceCount: deviceCount,
             limitationCount: limitationCount,
-            exclusionCount: exclusionCount
+            exclusionCount: exclusionCount,
+            otherTargetCount: otherTargetCount
         )
         parsePayloads()
         return result
@@ -131,6 +136,15 @@ final class ProfileDetailParser: NSObject, XMLParserDelegate {
                 else if inLimitations { limitationCount += 1 }
                 else { groupNames.append(value) }
             }
+        }
+        if inScope && elementName == "all_jss_users" && value.lowercased() == "true" {
+            otherTargetCount += 1
+        }
+        if inScope && elementName == "name" && !value.isEmpty,
+           ["building", "department", "user", "user_group", "jss_user", "jss_user_group", "network_segment"].contains(parent) {
+            if inExclusions { exclusionCount += 1 }
+            else if inLimitations { limitationCount += 1 }
+            else { otherTargetCount += 1 }
         }
         if inScope && elementName == "id" && !value.isEmpty {
             if ["computer", "mobile_device"].contains(parent) {

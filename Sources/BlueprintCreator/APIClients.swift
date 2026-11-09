@@ -52,10 +52,7 @@ actor PlatformProfileClient {
         clientSecret: String,
         environmentID: String
     ) throws {
-        guard let value = URL(string: url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))),
-              value.scheme == "https" else {
-            throw AppFailure.message("Platform API URL must be a valid HTTPS URL.")
-        }
+        let value = try Validators.platformBaseURL(url)
         guard !environmentID.isEmpty else {
             throw AppFailure.message("Platform API requires a Platform Environment ID.")
         }
@@ -82,11 +79,17 @@ actor PlatformProfileClient {
         let type = mobile
             ? "mobiledeviceconfigurationprofiles"
             : "osxconfigurationprofiles"
-        let data = try await get("proclassic/\(type)/id/\(profile.id)")
+        let profileID = try Validators.requireSafeIdentifier(profile.id, label: "Profile ID")
+        let data = try await get("proclassic/\(type)/id/\(profileID)")
         return try ProfileDetailParser().parse(data, base: profile)
     }
 
-    func unscopeProfile(id: String, mobile: Bool) async throws {
+    /// Removes every target from the source profile's scope. The original
+    /// `<scope>` element is saved first so the removal can be reversed.
+    /// Returns the backup file location.
+    @discardableResult
+    func unscopeProfile(id rawID: String, mobile: Bool) async throws -> URL {
+        let id = try Validators.requireSafeIdentifier(rawID, label: "Profile ID")
         let resource = mobile
             ? "mobiledeviceconfigurationprofiles"
             : "osxconfigurationprofiles"
@@ -117,34 +120,52 @@ actor PlatformProfileClient {
             )
         }
 
+        // Back up only the scope element; the full profile may hold secrets.
+        let name = firstCapture(in: originalXML, pattern: #"(?s)<general>.*?<name>([^<]*)</name>"#) ?? "Unknown"
+        let backup = try Self.writeScopeBackup(
+            scopeXML: existingScope, rootName: rootName, id: id, name: name, mobile: mobile
+        )
+        AppLogger.deployment.notice(
+            "Saved scope backup for source profile ID=\(id, privacy: .public)"
+        )
+
         let partialXML = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
             "<\(rootName)>\(modifiedScope)</\(rootName)>"
         let partial = try await putXML(path: path, xml: partialXML)
-        if partial.success {
-            try await verifyUnscoped(path: path, mobile: mobile, id: id)
-            AppLogger.deployment.notice(
-                "Source profile ID=\(id, privacy: .public) unscoped and verified with scope-only XML"
+        guard partial.success else {
+            throw AppFailure.message(
+                "Jamf Pro could not unscope profile \(id): HTTP \(partial.status): \(partial.body)\n\n" +
+                "The source profile remains scoped. The blueprint is unchanged."
             )
-            return
         }
-
-        var fullXML = originalXML
-        fullXML.replaceSubrange(scopeRange, with: modifiedScope)
-        let full = try await putXML(path: path, xml: fullXML)
-        if full.success {
-            try await verifyUnscoped(path: path, mobile: mobile, id: id)
-            AppLogger.deployment.notice(
-                "Source profile ID=\(id, privacy: .public) unscoped and verified with full-profile XML"
-            )
-            return
-        }
-
-        throw AppFailure.message(
-            "Jamf Pro could not unscope profile \(id).\n\n" +
-            "Scope-only update: HTTP \(partial.status): \(partial.body)\n\n" +
-            "Full-profile update: HTTP \(full.status): \(full.body)\n\n" +
-            "The deployed blueprint is unchanged and the source profile remains scoped."
+        try await verifyUnscoped(path: path, mobile: mobile, id: id)
+        AppLogger.deployment.notice(
+            "Source profile ID=\(id, privacy: .public) unscoped and verified with scope-only XML"
         )
+        return backup
+    }
+
+    private static func writeScopeBackup(
+        scopeXML: String, rootName: String, id: String, name: String, mobile: Bool
+    ) throws -> URL {
+        let fm = FileManager.default
+        let directory = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Blueprint Conversion Utility/Scope Backups", isDirectory: true)
+        try fm.createDirectory(
+            at: directory, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        let stamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        let file = directory.appendingPathComponent("profile-\(id)-\(stamp).xml")
+        let safeName = name.replacingOccurrences(of: "--", with: "- -")
+        let document = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+            "<!-- Scope backup. Profile: \(safeName) (ID \(id), \(mobile ? "mobile" : "computer")). " +
+            "Restore with a Classic API PUT of this document to \(rootName). -->\n" +
+            "<\(rootName)>\(scopeXML)</\(rootName)>\n"
+        try document.write(to: file, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        return file
     }
 
     private func verifyUnscoped(path: String, mobile: Bool, id: String) async throws {
@@ -292,10 +313,7 @@ actor PlatformClient {
     private var tokenExpiry = Date.distantPast
 
     init(url: String, clientID: String, clientSecret: String, environmentID: String) throws {
-        guard let value = URL(string: url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))),
-              value.scheme == "https" else {
-            throw AppFailure.message("Platform API URL must be a valid HTTPS URL.")
-        }
+        let value = try Validators.platformBaseURL(url)
         guard !environmentID.isEmpty else {
             throw AppFailure.message("Platform API requires a Platform Environment ID.")
         }
@@ -396,18 +414,27 @@ actor PlatformClient {
             body: data
         )
         let object = try JSONSerialization.jsonObject(with: response) as? [String: Any]
-        return String(describing: object?["id"] ?? object?["blueprintId"] ?? "Created")
+        guard let rawID = object?["id"] ?? object?["blueprintId"],
+              Validators.isSafeIdentifier(String(describing: rawID)) else {
+            throw AppFailure.message(
+                "The Platform created a blueprint but did not return a usable ID. " +
+                "Check Jamf for the new blueprint before retrying."
+            )
+        }
+        return String(describing: rawID)
     }
 
     func deployBlueprint(id: String) async throws {
+        let safeID = try Validators.requireSafeIdentifier(id, label: "Blueprint ID")
         _ = try await request(
-            path: "blueprints/v1/blueprints/\(id)/deploy",
+            path: "blueprints/v1/blueprints/\(safeID)/deploy",
             method: "POST",
             body: Data()
         )
     }
 
     func blueprintDeploymentState(id: String) async throws -> String? {
+        _ = try Validators.requireSafeIdentifier(id, label: "Blueprint ID")
         let response = try await request(
             path: "blueprints/v1/blueprints/\(id)",
             method: "GET",

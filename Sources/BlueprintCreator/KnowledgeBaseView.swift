@@ -166,8 +166,7 @@ struct KnowledgeBaseView: View {
             heading("jamf-cli", "How Jamf conversion code is used")
             paragraph("The application ships Jamf Concepts jamf-cli and a dedicated blueprint-profile-convert helper. The helper is compiled inside the Jamf CLI Go module so it can use internal/profileconvert directly.")
             bullets([
-                "Managed binary location: ~/.local/bin/jamf-cli",
-                "Managed converter location: ~/.local/bin/blueprint-profile-convert",
+                "Helper location: inside the application bundle (Contents/Resources/bin)",
                 "Bundled fallback location: the app's Contents/Resources/bin directory",
                 "Passcode payloads can become com.jamf.ddm.passcode-settings.",
                 "Supported Safari and software-update settings can become native DDM components.",

@@ -14,6 +14,12 @@ struct AppSettings: Codable, Equatable {
 
     init() { }
 
+    /// True when the configured host looks like a Jamf-operated endpoint.
+    var hostIsKnownJamf: Bool {
+        guard let host = URLComponents(string: platformURL)?.host?.lowercased() else { return false }
+        return ["jamfcloud.com", "jamf.com"].contains { host == $0 || host.hasSuffix(".\($0)") }
+    }
+
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         platformURL = try values.decodeIfPresent(String.self, forKey: .platformURL)
@@ -74,12 +80,15 @@ struct ProfileScope: Hashable {
     var individualDeviceCount = 0
     var limitationCount = 0
     var exclusionCount = 0
+    /// Buildings, departments, users, user groups and network segments.
+    var otherTargetCount = 0
 
     var summary: String {
         var parts: [String] = []
         if allDevices { parts.append("all devices") }
         if !groupNames.isEmpty { parts.append("\(groupNames.count) group(s)") }
         if individualDeviceCount > 0 { parts.append("\(individualDeviceCount) individual device(s)") }
+        if otherTargetCount > 0 { parts.append("\(otherTargetCount) building/department/user target(s)") }
         if limitationCount > 0 { parts.append("\(limitationCount) limitation(s)") }
         if exclusionCount > 0 { parts.append("\(exclusionCount) exclusion(s)") }
         return parts.isEmpty ? "Unscoped" : parts.joined(separator: ", ")
@@ -108,12 +117,6 @@ enum DeploymentChoice: String, Identifiable {
     case createOnly
     case createAndDistribute
     case createDistributeAndUnscope
-    var id: String { rawValue }
-}
-
-enum SourceProfileDisposition: String, Identifiable {
-    case distributeToAll
-    case doNotDistribute
     var id: String { rawValue }
 }
 

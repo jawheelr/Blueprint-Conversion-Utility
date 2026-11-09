@@ -37,6 +37,14 @@ actor AppUpdateService {
         }
 
         let rawTag = components[tagIndex + 1].removingPercentEncoding ?? components[tagIndex + 1]
+        // The tag becomes part of a download URL and file name.
+        guard !rawTag.isEmpty, rawTag.count <= 40,
+              rawTag.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "." || $0 == "-") }) else {
+            throw AppFailure.message("GitHub returned an unexpected release tag.")
+        }
+        guard finalURL.scheme == "https", finalURL.host?.lowercased() == "github.com" else {
+            throw AppFailure.message("The release page is not hosted on github.com.")
+        }
         let latest = Self.normalized(rawTag)
         let current = Self.normalized(currentVersion)
         guard Self.compare(latest, current) == .orderedDescending else { return nil }
@@ -106,7 +114,39 @@ actor AppUpdateService {
             [.posixPermissions: 0o600],
             ofItemAtPath: destination.path
         )
+        do {
+            try await Self.verifyPackageSignature(destination)
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            throw error
+        }
         return destination
+    }
+
+    /// When this app is Developer ID signed, the update package must be signed
+    /// by the same team. Ad-hoc builds (testing) have no team to compare, so the
+    /// package signature is only logged.
+    private static func verifyPackageSignature(_ package: URL) async throws {
+        let check = try await ProcessRunner.run(
+            URL(fileURLWithPath: "/usr/sbin/pkgutil"), ["--check-signature", package.path], timeout: 60
+        )
+        let signatureReport = check.stdoutText + check.stderrText
+        let appInfo = try await ProcessRunner.run(
+            URL(fileURLWithPath: "/usr/bin/codesign"), ["-dv", Bundle.main.bundleURL.path], timeout: 30
+        )
+        let team = (appInfo.stdoutText + appInfo.stderrText)
+            .split(separator: "\n")
+            .first { $0.hasPrefix("TeamIdentifier=") }
+            .map { String($0.dropFirst("TeamIdentifier=".count)) }
+        guard let team, team != "not set", !team.isEmpty else {
+            AppLogger.connections.notice("Running app has no Team ID; update package signature not enforced")
+            return
+        }
+        guard check.status == 0, signatureReport.contains("(\(team))") else {
+            throw AppFailure.message(
+                "The downloaded package is not signed by this application's developer team (\(team)). No installer was opened."
+            )
+        }
     }
 
     private static func normalized(_ value: String) -> String {

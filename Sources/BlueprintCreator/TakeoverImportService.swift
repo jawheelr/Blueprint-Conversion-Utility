@@ -1,8 +1,8 @@
 import Foundation
 
 actor TakeoverImportService {
-    func detect(executable: URL) throws -> TakeoverCapabilities {
-        let result = try run(executable, ["pro", "blueprints", "import-profile", "--help"], [:])
+    func detect(executable: URL) async throws -> TakeoverCapabilities {
+        let result = try await run(executable, ["pro", "blueprints", "import-profile", "--help"], [:], timeout: 30)
         let help = result.stdout + "\n" + result.stderr
         guard result.exitCode == 0, help.contains("import-profile") else { return TakeoverCapabilities() }
         return TakeoverCapabilities(
@@ -25,7 +25,7 @@ actor TakeoverImportService {
         stripDefaults: Bool, skipExclusions: Bool, skipLimitations: Bool,
         includeUnsupported: Bool, dryRun: Bool, deploymentIntent: DeploymentIntent = .createOnly,
         settings: AppSettings, secret: String
-    ) throws -> TakeoverImportResult {
+    ) async throws -> TakeoverImportResult {
         var args = ["pro", "blueprints", "import-profile", profile.id,
                     "--type", mobile ? "mobile" : "computer",
                     "--blueprint-name", blueprintName,
@@ -48,7 +48,7 @@ actor TakeoverImportService {
                    "JAMF_ENVIRONMENT_ID": settings.environmentID,
                    "JAMF_URL": settings.platformURL,
                    "JAMF_CLI_NO_UPDATE_CHECK": "1", "JAMF_CLI_NO_HINTS": "1"]
-        let result = try run(executable, args, env)
+        let result = try await run(executable, args, env, timeout: 900)
         let combined = result.stdout + "\n" + result.stderr
         let lower = combined.lowercased()
         let unsupportedTakeoverPhrases = ["takeover not supported", "takeover is not supported", "takeover is unsupported", "takeover not possible", "takeover is not possible", "cannot take over", "converting the profile rather than keeping it as installed"]
@@ -68,14 +68,14 @@ actor TakeoverImportService {
         return TakeoverImportResult(stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode, verdict: verdict, messages: messages, droppedKeys: dropped)
     }
 
-    private func run(_ executable: URL, _ arguments: [String], _ environment: [String: String]) throws -> (stdout: String, stderr: String, exitCode: Int32) {
-        let process = Process(); let output = Pipe(); let errors = Pipe()
-        process.executableURL = executable; process.arguments = arguments
-        process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
-        process.standardOutput = output; process.standardError = errors
-        try process.run(); process.waitUntilExit()
-        return (String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "",
-                String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "",
-                process.terminationStatus)
+    /// Output is read while the process runs (no pipe-buffer deadlock) and the
+    /// process is stopped if it exceeds `timeout`.
+    private func run(
+        _ executable: URL, _ arguments: [String], _ environment: [String: String], timeout: TimeInterval
+    ) async throws -> (stdout: String, stderr: String, exitCode: Int32) {
+        let output = try await ProcessRunner.run(
+            executable, arguments, environment: environment, timeout: timeout
+        )
+        return (output.stdoutText, output.stderrText, output.status)
     }
 }

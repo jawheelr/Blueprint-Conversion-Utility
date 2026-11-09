@@ -19,8 +19,7 @@ final class AppModel: ObservableObject {
     private let groupPageSize = 100
     @Published var conversionPlanSummary = "No conversion plan generated."
     @Published var conversionReady = false
-    @Published var showSourceDispositionPrompt = false
-    @Published var pendingDistributionChoice: SourceProfileDisposition?
+    @Published var showUnscopeConfirmation = false
     @Published var operationResult: OperationResult?
     @Published var showTakeoverUnscopeConfirmation = false
     @Published var takeoverUnscopeAcknowledged = false
@@ -96,6 +95,10 @@ final class AppModel: ObservableObject {
     private let profileConvertService = ProfileConvertService()
     private let appUpdateService = AppUpdateService()
     private var profileLoadGeneration = 0
+    private var conversionGeneration = 0
+    /// Profile the current `json` was generated from; nil when `json` is not a
+    /// generated blueprint (loading, failure, or a different selection).
+    private var jsonProfileID: String?
 
     var complete: Bool {
         !settings.platformURL.isEmpty &&
@@ -186,7 +189,7 @@ final class AppModel: ObservableObject {
             refreshPlatformCredentialHealth()
             alert = error.localizedDescription
             status = "Platform API connection test failed."
-            AppLogger.connections.error("\(error.localizedDescription, privacy: .public)")
+            AppLogger.connections.error("\(error.localizedDescription, privacy: .private)")
         }
     }
 
@@ -276,7 +279,7 @@ final class AppModel: ObservableObject {
             profileInspection = nil
             profileInspectionError = error.localizedDescription
             profileInspectionLoading = false
-            AppLogger.profiles.error("Profile inspector parse failed: \(error.localizedDescription, privacy: .public)")
+            AppLogger.profiles.error("Profile inspector parse failed: \(error.localizedDescription, privacy: .private)")
         }
     }
 
@@ -332,6 +335,8 @@ final class AppModel: ObservableObject {
         // Retain the lightweight list object immediately so the row remains
         // highlighted while full profile details and conversion data load.
         takeoverEvaluationTask?.cancel()
+        jsonProfileID = nil
+        conversionGeneration += 1
         profileInspection = nil
         profileInspectionError = nil
         profileInspectionLoading = true
@@ -402,7 +407,7 @@ final class AppModel: ObservableObject {
             json = "Profile loading failed.\n\n\(error.localizedDescription)"
             status = "Unable to load \(profile.name)."
             alert = error.localizedDescription
-            AppLogger.errors.error("\(error.localizedDescription, privacy: .public)")
+            AppLogger.errors.error("\(error.localizedDescription, privacy: .private)")
         }
 
         if generation == profileLoadGeneration,
@@ -421,7 +426,7 @@ final class AppModel: ObservableObject {
     }
 
     private func applyScope(_ profile: JamfProfile) {
-        AppLogger.profiles.info("Selected profile ID=\(profile.id, privacy: .public) name=\(profile.name, privacy: .public)")
+        AppLogger.profiles.info("Selected profile ID=\(profile.id, privacy: .public) name=\(profile.name, privacy: .private)")
         AppLogger.scope.info("Scope groups=\(profile.scope.groupNames.count) devices=\(profile.scope.individualDeviceCount) limitations=\(profile.scope.limitationCount) exclusions=\(profile.scope.exclusionCount)")
 
         let sourceGroups = profile.scope.groupNames
@@ -445,19 +450,19 @@ final class AppModel: ObservableObject {
             let method = exactMatch != nil ? "exact name" : "normalized name"
             let sourceGroupSummary = sourceGroups.joined(separator: ", ")
             AppLogger.scope.info(
-                "Matched source group to Platform group: source=\(sourceGroupSummary, privacy: .public), target=\(match.name, privacy: .public), family=\(expectedFamily.rawValue, privacy: .public), method=\(method, privacy: .public)"
+                "Matched source group to Platform group: source=\(sourceGroupSummary, privacy: .private), target=\(match.name, privacy: .private), family=\(expectedFamily.rawValue, privacy: .public), method=\(method, privacy: .public)"
             )
         }
 
         var messages: [String] = [
             "\(profile.name) (Profile ID \(profile.id)) — Scoped to: \(profile.scope.summary)"
         ]
-        if !profile.scope.allDevices && profile.scope.groupNames.isEmpty && profile.scope.individualDeviceCount == 0 {
+        if !profile.scope.allDevices && profile.scope.groupNames.isEmpty && profile.scope.individualDeviceCount == 0 && profile.scope.otherTargetCount == 0 {
             messages.append("ⓘ Source profile has 0 associated devices and groups. Conversion is allowed; choose a Platform device group before submission.")
         }
         if let selectedGroup {
             messages.append("✓ Auto-selected matching group: \(selectedGroup.name)")
-            AppLogger.scope.info("Auto-selected Platform group ID=\(selectedGroup.id, privacy: .public) name=\(selectedGroup.name, privacy: .public)")
+            AppLogger.scope.info("Auto-selected Platform group ID=\(selectedGroup.id, privacy: .public) name=\(selectedGroup.name, privacy: .private)")
         } else if !profile.scope.groupNames.isEmpty {
             messages.append("⚠ No Platform group matched the profile scope.")
             AppLogger.scope.warning("No Platform group matched profile ID=\(profile.id, privacy: .public)")
@@ -501,7 +506,7 @@ final class AppModel: ObservableObject {
         if profile.scope.individualDeviceCount > 0 { review.append("Direct-device assignments cannot be mapped automatically.") }
         if profile.scope.limitationCount > 0 { review.append("Profile limitations cannot be represented safely for automatic deployment.") }
         if profile.scope.exclusionCount > 0 && takeoverSkipExclusions { review.append("Exclusions were skipped and require review.") }
-        if !profile.scope.allDevices && profile.scope.groupNames.isEmpty && profile.scope.individualDeviceCount == 0 && importScopeMode == .preserveSource { review.append("The source profile is unscoped.") }
+        if !profile.scope.allDevices && profile.scope.groupNames.isEmpty && profile.scope.individualDeviceCount == 0 && profile.scope.otherTargetCount == 0 && importScopeMode == .preserveSource { review.append("The source profile is unscoped.") }
         guard jsonValidationMessage.localizedCaseInsensitiveContains("invalid") == false else { return .blocked([jsonValidationMessage]) }
         return review.isEmpty ? .allowed : .createOnly(review)
     }
@@ -618,18 +623,54 @@ final class AppModel: ObservableObject {
     }
 
     func generate() { Task { await generateHybrid() } }
+
     private func generateHybrid() async {
         guard let profile = selectedProfile else { return }
+        // Only the most recent conversion for the current selection may write
+        // `json`; a slower, older one must never overwrite it.
+        conversionGeneration += 1
+        let token = conversionGeneration
+        let profileID = profile.id
+        func isCurrent() -> Bool { token == conversionGeneration && selectedProfile?.id == profileID }
         do {
             let result = try await profileConvertService.convert(profile)
+            guard isCurrent() else { return }
             let components = (result.components ?? []).map(\.dictionary)
             guard !components.isEmpty else { throw AppFailure.message("profileconvert produced no components.") }
-            conversionReady = true; conversionWarnings = result.warnings ?? []
-            conversionPlanSummary = (result.conversions ?? []).isEmpty ? "jamf-cli profileconvert: legacy component ready" : (result.conversions ?? []).map { "jamf-cli profileconvert: \($0)" }.joined(separator: "\n")
+
+            var warnings = result.warnings ?? []
+            let redacted = BlueprintPayloadSanitizer.redactedCredentialFields(in: profile.payloads)
+            if !redacted.isEmpty {
+                warnings.append("Redacted credential value(s) in the source profile would be submitted as placeholder text: \(redacted.joined(separator: ", ")). Re-enter these in the Blueprint before deploying.")
+            }
+            conversionWarnings = warnings
+            var summary = (result.conversions ?? []).isEmpty
+                ? "jamf-cli profileconvert: legacy component ready"
+                : (result.conversions ?? []).map { "jamf-cli profileconvert: \($0)" }.joined(separator: "\n")
+            if !warnings.isEmpty { summary += "\n\n" + warnings.map { "⚠ \($0)" }.joined(separator: "\n") }
+            conversionPlanSummary = summary
+
             let name = result.displayName?.isEmpty == false ? result.displayName! : profile.name
-            let object:[String:Any] = ["name":"\(name) (from Configuration Profile #\(profile.id))","description":profile.description.isEmpty ? "Converted from configuration profile ID \(profile.id)." : profile.description,"scope":["deviceGroups":selectedGroup.map{[$0.id]} ?? []],"steps":[["name":name,"components":components]]]
-            let data=try JSONSerialization.data(withJSONObject:object,options:[.prettyPrinted,.sortedKeys]);json=String(data:data,encoding:.utf8) ?? "";loadBlueprintGUIFromJSON();status="Hybrid jamf-cli conversion preflight passed."
-        } catch { conversionReady=false;conversionPlanSummary="jamf-cli profileconvert failed: \(error.localizedDescription)";json="Conversion failed before Platform submission.\n\n\(error.localizedDescription)";status="Conversion failed." }
+            let object: [String: Any] = [
+                "name": "\(name) (from Configuration Profile #\(profile.id))",
+                "description": profile.description.isEmpty ? "Converted from configuration profile ID \(profile.id)." : profile.description,
+                "scope": ["deviceGroups": selectedGroup.map { [$0.id] } ?? []],
+                "steps": [["name": name, "components": components]]
+            ]
+            let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+            json = String(data: data, encoding: .utf8) ?? ""
+            jsonProfileID = profileID
+            conversionReady = true
+            loadBlueprintGUIFromJSON()
+            status = "Hybrid jamf-cli conversion preflight passed."
+        } catch {
+            guard isCurrent() else { return }
+            conversionReady = false
+            jsonProfileID = nil
+            conversionPlanSummary = "jamf-cli profileconvert failed: \(error.localizedDescription)"
+            json = "Conversion failed before Platform submission.\n\n\(error.localizedDescription)"
+            status = "Conversion failed."
+        }
     }
 
     func requestTakeoverUnscopeReview() {
@@ -661,10 +702,10 @@ final class AppModel: ObservableObject {
             busy = true
             defer { busy = false }
             do {
-                try await makeSourceProfiles().unscopeProfile(id: profile.id, mobile: mobile)
+                let backup = try await makeSourceProfiles().unscopeProfile(id: profile.id, mobile: mobile)
                 operationResult = OperationResult(
                     title: "Classic Configuration Profile Unscoped",
-                    details: "The Blueprint deployment was previously validated as DEPLOYED.\n\nConfiguration Profile: \(profile.name)\nProfile ID: \(profile.id)\nBlueprint ID: \(lastTakeoverBlueprintID ?? "Unknown")\n\nThe Classic Configuration Profile scope was removed only after explicit administrator confirmation."
+                    details: "The Blueprint deployment was previously validated as DEPLOYED.\n\nConfiguration Profile: \(profile.name)\nProfile ID: \(profile.id)\nBlueprint ID: \(lastTakeoverBlueprintID ?? "Unknown")\n\nThe Classic Configuration Profile scope was removed only after explicit administrator confirmation.\n\nOriginal scope saved to:\n\(backup.path)"
                 )
                 status = "Classic Configuration Profile unscoped after explicit takeover confirmation."
                 lastTakeoverDeploymentValidated = false
@@ -690,22 +731,114 @@ final class AppModel: ObservableObject {
     }
 
     func requestCreateDistributeAndUnscope() {
-        pendingDistributionChoice = nil; showDeploymentReview = false; showSourceDispositionPrompt = false
-        Task { @MainActor in try? await Task.sleep(nanoseconds: 250_000_000); self.showSourceDispositionPrompt = true }
+        showDeploymentReview = false
+        showUnscopeConfirmation = false
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            self.showUnscopeConfirmation = true
+        }
     }
 
-    func confirmSourceDisposition(_ disposition: SourceProfileDisposition) {
-        pendingDistributionChoice = disposition; showSourceDispositionPrompt = false; showDeploymentReview = false
-        Task { @MainActor in try? await Task.sleep(nanoseconds: 150_000_000); await self.performDeployment(.createDistributeAndUnscope) }
+    func confirmUnscope() {
+        showUnscopeConfirmation = false
+        showDeploymentReview = false
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            await self.performDeployment(.createDistributeAndUnscope, unscopeConfirmed: true)
+        }
     }
 
-    func performDeployment(_ choice: DeploymentChoice) async {
-        guard conversionReady else { alert="Conversion is not ready.";return }; guard let profile=selectedProfile,selectedGroup != nil else { alert="Select a Platform device group.";return }
-        if choice == .createDistributeAndUnscope && pendingDistributionChoice == nil { showSourceDispositionPrompt=true;return }
-        showSourceDispositionPrompt=false;showDeploymentReview=false;busy=true;alert=nil;defer{busy=false}
-        var blueprintID:String?;var created=false;var distributed=false;var sourceModified=false;var phase="Blueprint creation"
-        do { await Task.yield();guard let data=json.data(using:.utf8) else{throw AppFailure.message("Invalid blueprint JSON.")};let platform=try makePlatform();blueprintID=try await platform.createBlueprint(data);created=true;if choice != .createOnly{phase="Blueprint distribution";try await platform.deployBlueprint(id:blueprintID!);distributed=true};if choice == .createDistributeAndUnscope{phase="Configuration profile update";switch pendingDistributionChoice{case .distributeToAll:try await makeSourceProfiles().unscopeProfile(id:profile.id,mobile:mobile);case .doNotDistribute:try await makeSourceProfiles().unscopeProfile(id:profile.id,mobile:mobile);case .none:throw AppFailure.message("No source profile action selected.")};sourceModified=true};pendingDistributionChoice=nil;operationResult=OperationResult(title:"Blueprint Operation Completed",details:"Blueprint created: Yes\nBlueprint ID: \(blueprintID ?? "Unknown")\nBlueprint distributed: \(distributed ? "Yes":"No")\nConfiguration profile modified: \(sourceModified ? "Yes":"No")")
-        } catch { let snippet=String(error.localizedDescription.prefix(1800));operationResult=OperationResult(title:created && distributed ? "Blueprint Operation Partially Completed":"Blueprint Operation Failed",details:"Failed phase: \(phase)\nBlueprint created: \(created ? "Yes":"No")\nBlueprint ID: \(blueprintID ?? "Not created")\nBlueprint distributed: \(distributed ? "Yes":"No")\nConfiguration profile modified: \(sourceModified ? "Yes":"No")\n\nReturn log snippet:\n\(snippet)") }
+    /// Polls the Platform until the blueprint reports a terminal deployment state.
+    private func waitForDeployedState(blueprintID: String, profileID: String) async throws -> String? {
+        var state: String?
+        for delay: UInt64 in [2, 3, 5, 8, 12, 15] {
+            try await Task.sleep(nanoseconds: delay * 1_000_000_000)
+            guard selectedProfileID == profileID else {
+                throw AppFailure.message("The selected Configuration Profile changed during deployment validation.")
+            }
+            if let value = try? await makePlatform().blueprintDeploymentState(id: blueprintID) {
+                state = value.uppercased()
+                if state == "DEPLOYED" || ["DEPLOYMENT_FAILED", "FAILED", "ERROR"].contains(state ?? "") { break }
+            }
+        }
+        return state
+    }
+
+    func performDeployment(_ choice: DeploymentChoice, unscopeConfirmed: Bool = false) async {
+        guard !busy else { return }
+        guard conversionReady else { alert = "Conversion is not ready."; return }
+        guard let profile = selectedProfile, let group = selectedGroup else {
+            alert = "Select a Platform device group."
+            return
+        }
+        guard choice != .createDistributeAndUnscope || unscopeConfirmed else {
+            showUnscopeConfirmation = true
+            return
+        }
+        guard jsonProfileID == profile.id else {
+            alert = "The generated blueprint does not belong to the selected profile. Use Regenerate and review it before continuing."
+            return
+        }
+
+        showUnscopeConfirmation = false
+        showDeploymentReview = false
+        busy = true
+        alert = nil
+        defer { busy = false }
+
+        var blueprintID: String?
+        var created = false
+        var distributed = false
+        var sourceModified = false
+        var backupPath: String?
+        var finalState: String?
+        var phase = "Blueprint validation"
+        do {
+            let data = Data(json.utf8)
+            try BlueprintPayloadSanitizer.validateSubmission(
+                data, expectedProfileID: profile.id, expectedGroupID: group.id
+            )
+            let platform = try makePlatform()
+
+            phase = "Blueprint creation"
+            let newID = try await platform.createBlueprint(data)
+            blueprintID = newID
+            created = true
+
+            if choice != .createOnly {
+                phase = "Blueprint distribution"
+                try await platform.deployBlueprint(id: newID)
+                distributed = true
+            }
+            if choice == .createDistributeAndUnscope {
+                phase = "Deployment verification"
+                finalState = try await waitForDeployedState(blueprintID: newID, profileID: profile.id)
+                guard finalState == "DEPLOYED" else {
+                    throw AppFailure.message("Deployment state is \(finalState ?? "unknown"), not DEPLOYED. The source profile was not unscoped. Check the blueprint in Jamf.")
+                }
+                phase = "Configuration profile update"
+                let backup = try await makeSourceProfiles().unscopeProfile(id: profile.id, mobile: mobile)
+                backupPath = backup.path
+                sourceModified = true
+            }
+            operationResult = OperationResult(
+                title: "Blueprint Operation Completed",
+                details: "Blueprint created: Yes\nBlueprint ID: \(newID)\nBlueprint distribution requested: \(distributed ? "Yes" : "No")" +
+                    (finalState.map { "\nDeployment state: \($0)" } ?? "") +
+                    "\nConfiguration profile modified: \(sourceModified ? "Yes" : "No")" +
+                    (backupPath.map { "\nOriginal scope saved to:\n\($0)" } ?? "") +
+                    (distributed && finalState == nil ? "\n\nDeployment state was not verified by this action. Confirm it in Jamf." : "")
+            )
+        } catch {
+            let snippet = String(error.localizedDescription.prefix(1800))
+            AppLogger.errors.error("Deployment failed during \(phase, privacy: .public): \(error.localizedDescription, privacy: .private)")
+            operationResult = OperationResult(
+                title: created ? "Blueprint Operation Partially Completed" : "Blueprint Operation Failed",
+                details: "Failed phase: \(phase)\nBlueprint created: \(created ? "Yes" : "No")\nBlueprint ID: \(blueprintID ?? "Not created")\nBlueprint distribution requested: \(distributed ? "Yes" : "No")\nConfiguration profile modified: \(sourceModified ? "Yes" : "No")" +
+                    (created ? "\n\nA blueprint exists in Jamf. Review it before retrying so a duplicate is not created." : "") +
+                    "\n\nDetails:\n\(snippet)"
+            )
+        }
     }
 
     private var bundledTakeoverCLI: URL {
@@ -720,7 +853,7 @@ final class AppModel: ObservableObject {
         } catch {
             takeoverCapabilities = TakeoverCapabilities()
             workflowMode = .standard
-            AppLogger.connections.error("Profile takeover capability check failed: \(error.localizedDescription, privacy: .public)")
+            AppLogger.connections.error("Profile takeover capability check failed: \(error.localizedDescription, privacy: .private)")
         }
     }
 
@@ -747,7 +880,7 @@ final class AppModel: ObservableObject {
     }
 
     private func shellQuoted(_ value: String) -> String {
-        "'" + value.replacingOccurrences(of: "'", with: "'\''") + "'"
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     private func applyAutomaticRecommendation(for verdict: TakeoverVerdict, messages: [String]) {
@@ -1045,10 +1178,10 @@ final class AppModel: ObservableObject {
                         return
                     }
                     do {
-                        try await makeSourceProfiles().unscopeProfile(id: profile.id, mobile: mobile)
+                        let backup = try await makeSourceProfiles().unscopeProfile(id: profile.id, mobile: mobile)
                         operationResult = OperationResult(
                             title: "Blueprint Created, Deployed, and Profile Unscoped",
-                            details: completion.details + "\n\nClassic Configuration Profile scope: Removed after explicit administrator confirmation."
+                            details: completion.details + "\n\nClassic Configuration Profile scope: Removed after explicit administrator confirmation.\nOriginal scope saved to:\n\(backup.path)"
                         )
                         lastTakeoverDeploymentValidated = false
                     } catch {
@@ -1277,7 +1410,7 @@ final class AppModel: ObservableObject {
             }
         } catch {
             AppLogger.connections.error(
-                "Application update check failed: \(error.localizedDescription, privacy: .public)"
+                "Application update check failed: \(error.localizedDescription, privacy: .private)"
             )
             if manual {
                 alert = "Unable to check for updates right now.\n\nThe GitHub Releases page or network connection may be unavailable. Please try again later."
@@ -1318,7 +1451,7 @@ final class AppModel: ObservableObject {
             updateDownloadStatus = "Update download failed."
             alert = error.localizedDescription
             AppLogger.connections.error(
-                "Application update download failed: \(error.localizedDescription, privacy: .public)"
+                "Application update download failed: \(error.localizedDescription, privacy: .private)"
             )
         }
     }
@@ -1366,7 +1499,7 @@ final class AppModel: ObservableObject {
         catch {
             alert = error.localizedDescription
             status = "Operation failed."
-            AppLogger.errors.error("\(error.localizedDescription, privacy: .public)")
+            AppLogger.errors.error("\(error.localizedDescription, privacy: .private)")
         }
     }
 }

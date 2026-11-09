@@ -156,6 +156,11 @@ struct ConnectionsView: View {
             Text("Use the expiration date shown in the Jamf Platform API Client overview. The default warning period is 30 days.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if !model.settings.platformURL.isEmpty && !model.settings.hostIsKnownJamf {
+                Label("This host is not a recognized Jamf domain (jamfcloud.com or jamf.com). Your client secret is sent to it during authentication; confirm the URL is correct.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
             LabeledContent("Platform API test") {
                 Text(model.platformTested ? "Passed" : "Not tested")
                     .foregroundStyle(model.platformTested ? .green : .secondary)
@@ -205,27 +210,9 @@ struct ConnectionsView: View {
     }
 
     nonisolated private static func executeCLITest() -> CLITestResult {
-        let managed = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".local/bin/jamf-cli")
-        let bundled = Bundle.main.url(
-            forResource: "jamf-cli",
-            withExtension: nil,
-            subdirectory: "bin"
-        )
-
-        let executable: URL?
-        let source: String
-        if FileManager.default.isExecutableFile(atPath: managed.path) {
-            executable = managed
-            source = "Application-managed"
-        } else if let bundled,
-                  FileManager.default.isExecutableFile(atPath: bundled.path) {
-            executable = bundled
-            source = "Application bundle"
-        } else {
-            executable = nil
-            source = "Not found"
-        }
+        let executable = ManagedToolRepository.resolve("jamf-cli")
+        let source = executable == nil ? "Not found"
+            : (ManagedToolRepository.bundledTool("jamf-cli") != nil ? "Application bundle" : "Development copy")
 
         let timestamp = ISO8601DateFormatter().string(from: Date())
         guard let executable else {
@@ -239,7 +226,7 @@ struct ConnectionsView: View {
             jamf-cli --version
 
             Response
-            No executable was found in ~/.local/bin or the application bundle.
+            No jamf-cli executable was found in the application bundle.
 
             Exit code
             127

@@ -66,11 +66,15 @@ enum KeychainStore {
         if SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess {
             status = SecItemUpdate(
                 query as CFDictionary,
-                [kSecValueData as String: data] as CFDictionary
+                [
+                    kSecValueData as String: data,
+                    kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+                ] as CFDictionary
             )
         } else {
             var item = query
             item[kSecValueData as String] = data
+            item[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
             item[kSecAttrLabel as String] = "Blueprint Conversion Utility Platform API Credential"
             status = SecItemAdd(item as CFDictionary, nil)
         }
