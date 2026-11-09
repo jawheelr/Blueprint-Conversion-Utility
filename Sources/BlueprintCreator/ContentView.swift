@@ -16,15 +16,66 @@ struct ContentView: View {
             sidebar
         } detail: {
             workspace
+                .navigationTitle("")
+                .navigationSubtitle("")
         }
         .sheet(isPresented: $model.showConnections) {
             ConnectionsView().environmentObject(model)
         }
         .sheet(isPresented: $model.showAbout) { AboutView() }
         .sheet(isPresented: $model.showKB) { KnowledgeBaseView().environmentObject(model) }
+        .sheet(isPresented: $model.showAppleSchema) { AppleSchemaBrowserView() }
+        .sheet(isPresented: $model.showProfileInspector) { ProfileInspectorView().environmentObject(model) }
         .sheet(isPresented: $model.showLogs) { LogsView() }
         .sheet(isPresented: $model.showDeploymentReview) {
             DeploymentReviewView().environmentObject(model)
+        }
+        .sheet(isPresented: $model.showDeployAndUnscopeConfirmation) {
+            VStack(alignment: .leading, spacing: 18) {
+                Label("Create, Deploy, and Unscope", systemImage: "exclamationmark.shield.fill")
+                    .font(.title.bold()).foregroundStyle(.orange)
+                Text("BCU will create the takeover Blueprint, deploy it, wait for Jamf Platform to report DEPLOYED, and only then remove the Classic Configuration Profile scope.")
+                    .foregroundStyle(.secondary)
+                GroupBox("Safety sequence") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("1. Create the Blueprint with takeover-only protection.")
+                        Text("2. Deploy the Blueprint.")
+                        Text("3. Poll Jamf Platform until deployment is validated as DEPLOYED.")
+                        Text("4. Unscope the Classic Configuration Profile only after validation.")
+                        Text("If deployment is not validated, the Classic profile remains scoped.").bold()
+                    }.padding(8)
+                }
+                Toggle("I understand the Classic Configuration Profile will be unscoped only after the Blueprint deployment is validated as DEPLOYED.", isOn: $model.deployAndUnscopeAcknowledged)
+                    .toggleStyle(.checkbox)
+                HStack {
+                    Button("Cancel", role: .cancel) { model.showDeployAndUnscopeConfirmation = false }
+                    Spacer()
+                    Button("Create, Deploy, and Unscope", role: .destructive) { model.confirmCreateDeployAndUnscope() }
+                        .disabled(!model.deployAndUnscopeAcknowledged || model.busy)
+                }
+            }.padding(26).frame(width: 680)
+        }
+        .sheet(isPresented: $model.showTakeoverUnscopeConfirmation) {
+            VStack(alignment: .leading, spacing: 18) {
+                Label("Unscope Classic Configuration Profile", systemImage: "exclamationmark.shield.fill")
+                    .font(.title.bold()).foregroundStyle(.orange)
+                Text("This is a separate lifecycle action. The takeover Blueprint has already been validated as deployed. Unscoping changes the Classic Configuration Profile and can affect rollback behavior.")
+                    .foregroundStyle(.secondary)
+                GroupBox("Verify before continuing") {
+                    VStack(alignment: .leading, spacing: 9) {
+                        Label("Blueprint deployment validated as DEPLOYED", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                        Text("Confirm representative devices show the expected declaration and settings, activation conditions and scope behave as intended, and dropped-key diagnostics were reviewed.")
+                    }.padding(8)
+                }
+                Toggle("I verified takeover on representative devices and understand that unscoping the Classic Configuration Profile changes rollback and removal behavior.", isOn: $model.takeoverUnscopeAcknowledged)
+                    .toggleStyle(.checkbox)
+                HStack {
+                    Button("Cancel", role: .cancel) { model.showTakeoverUnscopeConfirmation = false }
+                    Spacer()
+                    Button("Unscope Classic Configuration Profile", role: .destructive) { model.confirmTakeoverUnscope() }
+                        .disabled(!model.takeoverUnscopeAcknowledged || model.busy)
+                }
+            }.padding(26).frame(width: 650)
         }
         .sheet(isPresented: $model.showUpdateAvailable) {
             UpdateAvailableView().environmentObject(model)
@@ -46,7 +97,13 @@ struct ContentView: View {
         } message: {
             Text(model.alert ?? "")
         }
-        .task { await model.launch() }
+        .task {
+            await model.launch()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 3_600_000_000_000)
+                model.refreshPlatformCredentialHealth()
+            }
+        }
     }
 
     private var sidebar: some View {
@@ -107,51 +164,8 @@ struct ContentView: View {
     private var workspace: some View {
         VStack(spacing: 0) {
             header
-            if !model.scopeNotice.isEmpty {
-                scopeBanner
-            }
             Divider()
-            HSplitView {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Generated Blueprint").font(.headline)
-                        Spacer()
-                        Button("Regenerate") { model.generate() }
-                            .disabled(model.selectedProfile == nil)
-                    }
-                    TextEditor(text: $model.json)
-                        .font(.system(.body, design: .monospaced))
-                }
-                .padding(18)
-
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Deployment").font(.headline)
-                    Picker("Device group", selection: $model.selectedGroup) {
-                        Text("Select a group").tag(DeviceGroup?.none)
-                        ForEach(model.groups) { group in
-                            Text(group.name).tag(Optional(group))
-                        }
-                    }
-                    .onChange(of: model.selectedGroup) { _ in model.generate() }
-
-                    GroupBox("Conversion Plan") {
-                        Text(model.conversionPlanSummary)
-                            .font(.caption.monospaced())
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    Spacer()
-                    Button("Create Blueprint") { model.requestCreate() }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        .disabled(
-                            !model.ready || model.selectedProfile == nil || model.busy
-                        )
-                }
-                .padding(18)
-                .frame(width: 320)
-                .background(Color(nsColor: .controlBackgroundColor))
-            }
+            BlueprintGUIEditorView().environmentObject(model).padding(18)
             statusBar
         }
     }
@@ -161,7 +175,7 @@ struct ContentView: View {
             AppIconView().frame(width: 52, height: 52)
             VStack(alignment: .leading) {
                 Text("Blueprint Conversion Utility").font(.title.bold())
-                Text("Configuration profiles to Jamf blueprints")
+                Text("Configuration profiles to Jamf Blueprints")
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -192,14 +206,35 @@ struct ContentView: View {
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
+    private var credentialHealthColor: Color {
+        switch model.platformCredentialHealth {
+        case .valid: return .green
+        case .expiringSoon: return .yellow
+        case .expired, .authenticationFailed: return .red
+        case .notConfigured: return .secondary
+        }
+    }
+
+    private var credentialHealthIcon: String {
+        switch model.platformCredentialHealth {
+        case .valid: return "checkmark.circle.fill"
+        case .expiringSoon: return "exclamationmark.triangle.fill"
+        case .expired, .authenticationFailed: return "xmark.octagon.fill"
+        case .notConfigured: return "questionmark.circle.fill"
+        }
+    }
+
     private var statusBar: some View {
         HStack {
             if model.busy { ProgressView().controlSize(.small) }
             Text(model.status).font(.caption)
-            Spacer()
-            Text("Creator: Jarred Wheeler")
+            Spacer(minLength: 20)
+            Label(model.credentialHealthText, systemImage: credentialHealthIcon)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(credentialHealthColor)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .help(model.credentialHealthText)
         }
         .padding(.horizontal, 18)
         .frame(height: 36)

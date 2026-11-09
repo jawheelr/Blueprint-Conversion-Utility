@@ -126,9 +126,34 @@ struct ConnectionsView: View {
             TextField("Platform API URL", text: $model.settings.platformURL)
             TextField("Client ID", text: $model.settings.platformClientID)
             SecureField("Client secret", text: $model.platformSecret)
-            TextField("Environment ID (use this or Tenant ID)", text: $model.settings.environmentID)
-            TextField("Tenant ID (use this or Environment ID)", text: $model.settings.tenantID)
-            Text("Specify exactly one scope identifier. Platform profile operations use the /proclassic gateway with the same Platform OAuth token.")
+            TextField("Platform Environment ID", text: $model.settings.environmentID)
+            Text("Enter the Platform Environment ID selected when the API Client was created. All scoped requests use X-Environment-Id.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            DatePicker(
+                "API Client expiration date",
+                selection: Binding(
+                    get: {
+                        model.settings.integrationExpirationDate
+                            ?? Calendar.current.startOfDay(for: Date())
+                    },
+                    set: { value in
+                        model.settings.integrationExpirationDate = value
+                        model.refreshPlatformCredentialHealth()
+                    }
+                ),
+                displayedComponents: .date
+            )
+            Stepper(
+                "Expiration warning: \(model.settings.expiryWarningDays) days",
+                value: $model.settings.expiryWarningDays,
+                in: 1...180
+            )
+            .onChange(of: model.settings.expiryWarningDays) { _ in
+                model.refreshPlatformCredentialHealth()
+            }
+            Text("Use the expiration date shown in the Jamf Platform API Client overview. The default warning period is 30 days.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             LabeledContent("Platform API test") {
@@ -141,7 +166,6 @@ struct ConnectionsView: View {
         .onChange(of: model.settings.platformClientID) { _ in model.platformTested = false }
         .onChange(of: model.platformSecret) { _ in model.platformTested = false }
         .onChange(of: model.settings.environmentID) { _ in model.platformTested = false }
-        .onChange(of: model.settings.tenantID) { _ in model.platformTested = false }
     }
 
     private var jamfCLIForm: some View {

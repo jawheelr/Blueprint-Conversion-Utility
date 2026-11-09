@@ -43,7 +43,6 @@ actor PlatformProfileClient {
     private let clientID: String
     private let clientSecret: String
     private let environmentID: String
-    private let tenantID: String
     private var accessToken = ""
     private var tokenExpiry = Date.distantPast
 
@@ -51,24 +50,19 @@ actor PlatformProfileClient {
         url: String,
         clientID: String,
         clientSecret: String,
-        environmentID: String,
-        tenantID: String
+        environmentID: String
     ) throws {
         guard let value = URL(string: url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))),
               value.scheme == "https" else {
             throw AppFailure.message("Platform API URL must be a valid HTTPS URL.")
         }
-        guard !environmentID.isEmpty || !tenantID.isEmpty else {
-            throw AppFailure.message("Platform API requires an Environment ID or Tenant ID.")
-        }
-        guard environmentID.isEmpty || tenantID.isEmpty else {
-            throw AppFailure.message("Specify either Environment ID or Tenant ID, not both.")
+        guard !environmentID.isEmpty else {
+            throw AppFailure.message("Platform API requires a Platform Environment ID.")
         }
         baseURL = value
         self.clientID = clientID
         self.clientSecret = clientSecret
         self.environmentID = environmentID
-        self.tenantID = tenantID
     }
 
     func test() async throws {
@@ -274,11 +268,7 @@ actor PlatformProfileClient {
     }
 
     private func applyScopeHeader(to request: inout URLRequest) {
-        if !environmentID.isEmpty {
-            request.setValue(environmentID, forHTTPHeaderField: "X-Environment-Id")
-        } else {
-            request.setValue(tenantID, forHTTPHeaderField: "X-Tenant-Id")
-        }
+        request.setValue(environmentID, forHTTPHeaderField: "X-Environment-Id")
     }
 
     private func get(_ path: String) async throws -> Data {
@@ -298,82 +288,112 @@ actor PlatformClient {
     private let clientID: String
     private let clientSecret: String
     private let environmentID: String
-    private let tenantID: String
     private var accessToken = ""
     private var tokenExpiry = Date.distantPast
 
-    init(url: String, clientID: String, clientSecret: String, environmentID: String, tenantID: String) throws {
+    init(url: String, clientID: String, clientSecret: String, environmentID: String) throws {
         guard let value = URL(string: url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))),
               value.scheme == "https" else {
             throw AppFailure.message("Platform API URL must be a valid HTTPS URL.")
         }
-        guard !environmentID.isEmpty || !tenantID.isEmpty else {
-            throw AppFailure.message("Platform API requires an Environment ID or Tenant ID.")
-        }
-        guard environmentID.isEmpty || tenantID.isEmpty else {
-            throw AppFailure.message("Specify either Environment ID or Tenant ID, not both.")
+        guard !environmentID.isEmpty else {
+            throw AppFailure.message("Platform API requires a Platform Environment ID.")
         }
         baseURL = value
         self.clientID = clientID
         self.clientSecret = clientSecret
         self.environmentID = environmentID
-        self.tenantID = tenantID
     }
 
     func test() async throws {
         _ = try await authenticate()
     }
 
-    func groups() async throws -> [DeviceGroup] {
+    struct DeviceGroupPage: Sendable {
+        let groups: [DeviceGroup]
+        let page: Int
+        let pageSize: Int
+        let totalCount: Int?
+        let hasMore: Bool
+    }
+
+    func groups(page: Int = 0, pageSize: Int = 100) async throws -> DeviceGroupPage {
         let data = try await request(
             path: "device-groups/v1/device-groups",
             method: "GET",
             body: nil,
-            preferTenant: true
+            queryItems: [
+                URLQueryItem(name: "page", value: String(page)),
+                URLQueryItem(name: "page-size", value: String(pageSize))
+            ]
         )
         let object = try JSONSerialization.jsonObject(with: data)
+        let dictionary = object as? [String: Any]
         let records: [[String: Any]]
-        if let dictionary = object as? [String: Any] {
+        if let dictionary {
             records = dictionary["results"] as? [[String: Any]]
                 ?? dictionary["items"] as? [[String: Any]]
+                ?? dictionary["data"] as? [[String: Any]]
                 ?? []
         } else {
             records = object as? [[String: Any]] ?? []
         }
-        return records.compactMap { row in
-            guard let rawID = row["id"] else { return nil }
-            let id = String(describing: rawID)
-            let name = row["name"] as? String ?? id
-            let keys = [
-                "deviceType", "deviceFamily", "platform", "type", "osType",
-                "groupType", "memberType", "deviceGroupType", "objectType",
-                "deviceCollectionType", "targetType"
-            ]
-            let metadata = keys.compactMap {
-                row[$0].map { String(describing: $0).lowercased() }
-            }.joined(separator: " ")
-            let family: DeviceGroupFamily
-            if metadata.contains("mobile") || metadata.contains("ios") ||
-                metadata.contains("ipados") || metadata.contains("ipad") ||
-                metadata.contains("iphone") || metadata.contains("tvos") {
-                family = .mobile
-            } else if metadata.contains("computer") ||
-                        metadata.contains("macos") ||
-                        metadata.contains("mac") {
-                family = .computer
-            } else {
-                family = .unknown
-            }
-            return DeviceGroup(id: id, name: name, family: family)
+
+        let groups = records.compactMap(Self.deviceGroup(from:))
+        let totalCount = Self.integerValue(
+            dictionary?["totalCount"] ?? dictionary?["total"] ??
+            (dictionary?["pagination"] as? [String: Any])?["totalCount"] ??
+            (dictionary?["page"] as? [String: Any])?["totalElements"]
+        )
+        let loadedThrough = (page * pageSize) + records.count
+        let hasMore = totalCount.map { loadedThrough < $0 } ?? (records.count == pageSize)
+        return DeviceGroupPage(
+            groups: groups,
+            page: page,
+            pageSize: pageSize,
+            totalCount: totalCount,
+            hasMore: hasMore
+        )
+    }
+
+    private static func deviceGroup(from row: [String: Any]) -> DeviceGroup? {
+        guard let rawID = row["id"] else { return nil }
+        let id = String(describing: rawID)
+        let name = row["name"] as? String ?? id
+        let keys = [
+            "deviceType", "deviceFamily", "platform", "type", "osType",
+            "groupType", "memberType", "deviceGroupType", "objectType",
+            "deviceCollectionType", "targetType"
+        ]
+        let metadata = keys.compactMap {
+            row[$0].map { String(describing: $0).lowercased() }
+        }.joined(separator: " ")
+        let family: DeviceGroupFamily
+        if metadata.contains("mobile") || metadata.contains("ios") ||
+            metadata.contains("ipados") || metadata.contains("ipad") ||
+            metadata.contains("iphone") || metadata.contains("tvos") {
+            family = .mobile
+        } else if metadata.contains("computer") ||
+                    metadata.contains("macos") || metadata.contains("mac") {
+            family = .computer
+        } else {
+            family = .unknown
         }
+        return DeviceGroup(id: id, name: name, family: family)
+    }
+
+    private static func integerValue(_ value: Any?) -> Int? {
+        if let value = value as? Int { return value }
+        if let value = value as? NSNumber { return value.intValue }
+        if let value = value as? String { return Int(value) }
+        return nil
     }
 
     func createBlueprint(_ data: Data) async throws -> String {
         let response = try await request(
             path: "blueprints/v1/blueprints",
             method: "POST",
-            body: data,
-            preferTenant: false
+            body: data
         )
         let object = try JSONSerialization.jsonObject(with: response) as? [String: Any]
         return String(describing: object?["id"] ?? object?["blueprintId"] ?? "Created")
@@ -383,9 +403,32 @@ actor PlatformClient {
         _ = try await request(
             path: "blueprints/v1/blueprints/\(id)/deploy",
             method: "POST",
-            body: Data(),
-            preferTenant: false
+            body: Data()
         )
+    }
+
+    func blueprintDeploymentState(id: String) async throws -> String? {
+        let response = try await request(
+            path: "blueprints/v1/blueprints/\(id)",
+            method: "GET",
+            body: nil
+        )
+        let object = try JSONSerialization.jsonObject(with: response)
+        return deploymentState(in: object)
+    }
+
+    private func deploymentState(in value: Any) -> String? {
+        if let object = value as? [String: Any] {
+            if let deployment = object["deploymentState"] as? [String: Any],
+               let state = deployment["state"] as? String { return state }
+            if let state = object["deploymentState"] as? String { return state }
+            if let state = object["state"] as? String,
+               ["DEPLOYED", "NOT_DEPLOYED", "DEPLOYMENT_PENDING", "DEPLOYMENT_FAILED", "FAILED", "ERROR"].contains(state.uppercased()) { return state }
+            for child in object.values { if let state = deploymentState(in: child) { return state } }
+        } else if let array = value as? [Any] {
+            for child in array { if let state = deploymentState(in: child) { return state } }
+        }
+        return nil
     }
 
     private func authenticate() async throws -> String {
@@ -408,20 +451,25 @@ actor PlatformClient {
         return accessToken
     }
 
-    private func request(path: String, method: String, body: Data?, preferTenant: Bool) async throws -> Data {
+    private func request(
+        path: String,
+        method: String,
+        body: Data?,
+        queryItems: [URLQueryItem] = []
+    ) async throws -> Data {
         let token = try await authenticate()
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        let endpoint = baseURL.appendingPathComponent(path)
+        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+        components?.queryItems = queryItems.isEmpty ? nil : queryItems
+        guard let url = components?.url else {
+            throw AppFailure.message("Unable to construct Platform API request URL.")
+        }
+        var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        if preferTenant && !tenantID.isEmpty {
-            request.setValue(tenantID, forHTTPHeaderField: "X-Tenant-Id")
-        } else if !environmentID.isEmpty {
-            request.setValue(environmentID, forHTTPHeaderField: "X-Environment-Id")
-        } else {
-            request.setValue(tenantID, forHTTPHeaderField: "X-Tenant-Id")
-        }
+        request.setValue(environmentID, forHTTPHeaderField: "X-Environment-Id")
 
         if let body {
             request.httpBody = body

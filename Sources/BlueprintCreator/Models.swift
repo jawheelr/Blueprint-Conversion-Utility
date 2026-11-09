@@ -4,10 +4,12 @@ struct AppSettings: Codable, Equatable {
     var platformURL = "https://us.api.jamfcloud.com"
     var platformClientID = ""
     var environmentID = ""
-    var tenantID = ""
+    var integrationExpirationDate: Date?
+    var expiryWarningDays = 30
 
     enum CodingKeys: String, CodingKey {
-        case platformURL, platformClientID, environmentID, tenantID
+        case platformURL, platformClientID, environmentID
+        case integrationExpirationDate, expiryWarningDays
     }
 
     init() { }
@@ -18,10 +20,53 @@ struct AppSettings: Codable, Equatable {
             ?? "https://us.api.jamfcloud.com"
         platformClientID = try values.decodeIfPresent(String.self, forKey: .platformClientID) ?? ""
         environmentID = try values.decodeIfPresent(String.self, forKey: .environmentID) ?? ""
-        tenantID = try values.decodeIfPresent(String.self, forKey: .tenantID) ?? ""
+        integrationExpirationDate = try values.decodeIfPresent(
+            Date.self,
+            forKey: .integrationExpirationDate
+        )
+        expiryWarningDays = try values.decodeIfPresent(
+            Int.self,
+            forKey: .expiryWarningDays
+        ) ?? 30
     }
 }
 
+enum PlatformCredentialHealth: Equatable {
+    case notConfigured
+    case valid(daysRemaining: Int, expirationDate: Date)
+    case expiringSoon(daysRemaining: Int, expirationDate: Date)
+    case expired(daysExpired: Int, expirationDate: Date)
+    case authenticationFailed
+}
+
+enum PlatformCredentialEvaluator {
+    static func evaluate(
+        expirationDate: Date?,
+        warningDays: Int,
+        authenticationPassed: Bool,
+        authenticationFailed: Bool,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> PlatformCredentialHealth {
+        if authenticationFailed { return .authenticationFailed }
+        guard let expirationDate else { return .notConfigured }
+        let today = calendar.startOfDay(for: now)
+        let expiration = calendar.startOfDay(for: expirationDate)
+        guard let days = calendar.dateComponents([.day], from: today, to: expiration).day else {
+            return .notConfigured
+        }
+        if days < 0 {
+            return .expired(daysExpired: abs(days), expirationDate: expiration)
+        }
+        if days <= max(1, warningDays) {
+            return .expiringSoon(daysRemaining: days, expirationDate: expiration)
+        }
+        if authenticationPassed {
+            return .valid(daysRemaining: days, expirationDate: expiration)
+        }
+        return .notConfigured
+    }
+}
 
 struct ProfileScope: Hashable {
     var allDevices = false

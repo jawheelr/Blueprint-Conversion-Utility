@@ -31,18 +31,34 @@ struct UpdateAvailableView: View {
                     .frame(minHeight: 220)
                 }
 
-                Text("Updates are downloaded from the project's GitHub Releases page. The app does not silently replace itself.")
+                Text("The app downloads the versioned PKG, validates it, and opens the native macOS Installer. After Installer opens, this application closes. When the installed version changes, the application relaunches automatically. Installer confirmation and administrator authorization may still be required.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                if !model.updateDownloadStatus.isEmpty {
+                    HStack(spacing: 8) {
+                        if model.updateDownloadInProgress {
+                            ProgressView().controlSize(.small)
+                        }
+                        Text(model.updateDownloadStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 HStack {
                     Button("Skip for Now") { dismiss() }
-                    Spacer()
-                    Button("Open Release Page") {
+                        .disabled(model.updateDownloadInProgress)
+                    Button("Release Page") {
                         NSWorkspace.shared.open(update.releaseURL)
-                        dismiss()
+                    }
+                    .disabled(model.updateDownloadInProgress)
+                    Spacer()
+                    Button(model.updateDownloadInProgress ? "Downloading..." : "Download and Install") {
+                        Task { await model.downloadAndInstallAvailableUpdate() }
                     }
                     .buttonStyle(.borderedProminent)
+                    .disabled(model.updateDownloadInProgress)
                 }
             }
         }

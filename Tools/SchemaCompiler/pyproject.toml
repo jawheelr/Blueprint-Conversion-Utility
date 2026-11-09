@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "apple-device-management-schema-compiler"
+version = "0.1.0"
+description = "Compiles Apple Device Management YAML schemas into a deterministic BCU runtime catalog"
+requires-python = ">=3.11"
+dependencies = ["PyYAML>=6.0"]
+
+[project.scripts]
+apple-schema-compiler = "schema_compiler.cli:main"
+
+[tool.setuptools]
+packages = ["schema_compiler"]
