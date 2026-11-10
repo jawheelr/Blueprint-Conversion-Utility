@@ -10,4 +10,5 @@ struct AppLogger {
     static let blueprint = Logger(subsystem: subsystem, category: "Blueprint")
     static let deployment = Logger(subsystem: subsystem, category: "Deployment")
     static let errors = Logger(subsystem: subsystem, category: "Errors")
+    static let ai = Logger(subsystem: subsystem, category: "Advisor")
 }

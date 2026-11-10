@@ -44,6 +44,10 @@ final class AppModel: ObservableObject {
     @Published var showKB = false
     @Published var showAppleSchema = false
     @Published var showProfileInspector = false
+    @Published var showAdvisor = false
+    @Published var advice: AdvisorAdvice?
+    @Published var adviceRefreshing = false
+    private var adviceTask: Task<Void, Never>?
     @Published var profileInspection: ProfileInspectorDocument?
     @Published var profileInspectionError: String?
     @Published var profileInspectionLoading = false
@@ -356,6 +360,7 @@ final class AppModel: ObservableObject {
         recommendationIsAutomatic = true
         takeoverVerdict = .notEvaluated
         takeoverMessages = []
+        adviceTask?.cancel(); advice = nil; adviceRefreshing = false
         takeoverRawOutput = ""
         takeoverEvaluationState = .waiting
         runStage = .idle
@@ -649,6 +654,7 @@ final class AppModel: ObservableObject {
                 : (result.conversions ?? []).map { "jamf-cli profileconvert: \($0)" }.joined(separator: "\n")
             if !warnings.isEmpty { summary += "\n\n" + warnings.map { "⚠ \($0)" }.joined(separator: "\n") }
             conversionPlanSummary = summary
+            refreshAdvice()
 
             let name = result.displayName?.isEmpty == false ? result.displayName! : profile.name
             let object: [String: Any] = [
@@ -866,7 +872,6 @@ final class AppModel: ObservableObject {
             "--type", mobile ? "mobile" : "computer",
             "--blueprint-name", shellQuoted(profile.name)
         ]
-        if importMode == .convert { parts.append("--convert") }
         if takeoverStripDefaults { parts.append("--strip-defaults") }
         if takeoverSkipExclusions { parts.append("--skip-exclusions") }
         if takeoverSkipLimitations { parts.append("--skip-limitations") }
@@ -877,6 +882,27 @@ final class AppModel: ObservableObject {
         }
         parts.append(contentsOf: ["--environment-id", settings.environmentID, "--url", shellQuoted(settings.platformURL), "--no-input", "--no-update-check", "--no-color"])
         return parts.joined(separator: " ")
+    }
+
+    /// Rebuilds the read-only "Explain & Recommend" advice for the selected profile.
+    /// Only structured findings are used; stale results are dropped.
+    func refreshAdvice() {
+        guard let profile = selectedProfile else { advice = nil; adviceRefreshing = false; return }
+        let profileID = profile.id
+        let generation = profileLoadGeneration
+        let findings = AdvisorRules.findings(
+            from: takeoverMessages + conversionWarnings,
+            scope: profile.scope,
+            redactedFieldCount: BlueprintPayloadSanitizer.redactedCredentialFields(in: profile.payloads).count
+        )
+        adviceTask?.cancel()
+        adviceRefreshing = true
+        adviceTask = Task { @MainActor in
+            let result = await AdvisorService.advise(findings: findings)
+            guard !Task.isCancelled, self.selectedProfileID == profileID, self.profileLoadGeneration == generation else { return }
+            self.advice = result
+            self.adviceRefreshing = false
+        }
     }
 
     private func shellQuoted(_ value: String) -> String {
@@ -893,6 +919,9 @@ final class AppModel: ObservableObject {
         case .unsupported:
             recommendation = conversionReady ? .convert : .createForReview
             reasons.insert(conversionReady ? "jamf-cli determined that the installed profile cannot be taken over. Conversion is the safest available path." : "Takeover is not supported and conversion requires administrator review.", at: 0)
+        case .previewGenerated where importMode == .convert:
+            recommendation = .convert
+            reasons.insert("Conversion preview completed. The converted blueprint installs beside the Classic profile and cannot take over the installed copy.", at: 0)
         case .previewGenerated, .unknown:
             recommendation = .evaluationIncomplete
             reasons.insert("jamf-cli processed the profile but did not return a recognizable final takeover verdict.", at: 0)
@@ -1117,6 +1146,7 @@ final class AppModel: ObservableObject {
             takeoverMessages = Array(Set(result.messages + result.droppedKeys)).sorted()
             takeoverRawOutput = [result.stdout, result.stderr].filter { !$0.isEmpty }.joined(separator: "\n")
             applyAutomaticRecommendation(for: result.verdict, messages: takeoverMessages)
+            refreshAdvice()
             switch result.verdict {
             case .supported:
                 takeoverEvaluationState = .supported

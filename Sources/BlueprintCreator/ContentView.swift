@@ -34,6 +34,7 @@ struct ContentView: View {
         .sheet(isPresented: $model.showKB) { KnowledgeBaseView().environmentObject(model) }
         .sheet(isPresented: $model.showAppleSchema) { AppleSchemaBrowserView() }
         .sheet(isPresented: $model.showProfileInspector) { ProfileInspectorView().environmentObject(model) }
+        .sheet(isPresented: $model.showAdvisor) { AdvisorPanel().environmentObject(model) }
         .sheet(isPresented: $model.showLogs) { LogsView() }
         .sheet(isPresented: $model.showDeploymentReview) {
             DeploymentReviewView().environmentObject(model)

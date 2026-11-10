@@ -20,7 +20,12 @@ struct DeploymentReviewView: View {
             GroupBox("Takeover Analysis") {
                 VStack(alignment: .leading, spacing: 8) {
                     Label(model.takeoverVerdict.title, systemImage: verdictIcon).font(.headline).foregroundStyle(verdictColor)
-                    ForEach(Array(model.takeoverMessages.enumerated()), id: \.offset) { _, item in Text(item).font(.caption).textSelection(.enabled) }
+                    ForEach(Array(model.takeoverMessages.enumerated()), id: \.offset) { _, item in
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(item).font(.caption).textSelection(.enabled)
+                            AdvisorInfoButton(line: item)
+                        }
+                    }
                     if model.takeoverMessages.isEmpty { Text("Preview takeover to receive a verdict before creation.").font(.caption).foregroundStyle(.secondary) }
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
             }

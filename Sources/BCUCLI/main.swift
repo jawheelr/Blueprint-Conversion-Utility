@@ -127,6 +127,7 @@ struct BCUCLI {
         case "groups": return try await groups(Array(args.dropFirst()), mode)
         case "logs": return try logs(Array(args.dropFirst()))
         case "app": return try await app(Array(args.dropFirst()), mode)
+        case "build-advisor-index": return try AdvisorIndexBuilder.run(Array(args.dropFirst()))
         default: throw CLIError.message("Unknown command '\(first)'. Run 'bcu help'.")
         }
     }
@@ -282,6 +283,112 @@ struct BCUCLI {
           logs stream [--category Category]
           app open
           app check-for-updates [--output json]
+          build-advisor-index --version <v> --out <file.json> --source "label|/path" [...]
         """)
+    }
+}
+
+
+/// `bcu build-advisor-index`: turns documentation files into the retrieval index
+/// the app bundles under Contents/Resources/Advisor. Used by build.sh, offline.
+///
+/// bcu build-advisor-index --version 1.36.0 --out index.json --source "label|/path/file" [...]
+enum AdvisorIndexBuilder {
+    struct Passage: Encodable {
+        let id: String
+        let source: String
+        let heading: String
+        let text: String
+    }
+
+    struct Corpus: Encodable {
+        let version: String
+        let passages: [Passage]
+    }
+
+    static func run(_ args: [String]) throws -> Int {
+        func values(_ flag: String) -> [String] {
+            var found: [String] = []
+            for index in args.indices where args[index] == flag && args.indices.contains(index + 1) {
+                found.append(args[index + 1])
+            }
+            return found
+        }
+        guard let version = values("--version").first, let out = values("--out").first else {
+            throw CLIError.message("Usage: bcu build-advisor-index --version <jamf-cli version> --out <file.json> --source \"label|/path/to/file\" [--source ...]")
+        }
+        var passages: [Passage] = []
+        for (number, spec) in values("--source").enumerated() {
+            let parts = spec.split(separator: "|", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { throw CLIError.message("--source must look like \"label|/path/to/file\": \(spec)") }
+            guard let data = FileManager.default.contents(atPath: parts[1]) else {
+                throw CLIError.message("Cannot read \(parts[1]).")
+            }
+            let text = String(decoding: data, as: UTF8.self)
+            passages += chunk(text: text, source: "jamf-cli \(version) · \(parts[0])", idPrefix: "s\(number)")
+        }
+        guard !passages.isEmpty else { throw CLIError.message("No passages were produced; check the --source files.") }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let corpus = Corpus(version: "jamf-cli v\(version) documentation", passages: passages)
+        try encoder.encode(corpus).write(to: URL(fileURLWithPath: out), options: .atomic)
+        print("Wrote \(passages.count) passage(s) to \(out)")
+        return 0
+    }
+
+    static func chunk(text: String, source: String, idPrefix: String, maxLength: Int = 900) -> [Passage] {
+        var passages: [Passage] = []
+        var heading = ""
+        var current: [String] = []
+        var currentLength = 0
+        let skippedHeadings: Set<String> = ["Global Flags", "Usage"]
+
+        func flush() {
+            let body = current.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            current = []
+            currentLength = 0
+            guard body.count >= 40, !skippedHeadings.contains(heading) else { return }
+            passages.append(Passage(
+                id: "\(idPrefix)-\(passages.count)",
+                source: source,
+                heading: heading.isEmpty ? String(body.prefix(60)) : heading,
+                text: String(body.prefix(1200))
+            ))
+        }
+
+        var lines = text.components(separatedBy: .newlines)
+        // Drop YAML front matter ("---" ... "---") from markdown files.
+        if lines.first == "---", let end = lines.dropFirst().firstIndex(of: "---") { lines = Array(lines[(end + 1)...]) }
+        for rawLine in lines {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if let newHeading = headingText(rawLine) {
+                flush()
+                heading = newHeading
+                continue
+            }
+            if line.isEmpty {
+                if currentLength >= maxLength { flush() }
+                continue
+            }
+            if currentLength + line.count > Int(Double(maxLength) * 1.3) { flush() }
+            current.append(line)
+            currentLength += line.count + 1
+        }
+        flush()
+        return passages
+    }
+
+    /// Markdown headings, or unindented "Title:" lines in plain help text.
+    private static func headingText(_ rawLine: String) -> String? {
+        let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("#") {
+            let title = trimmed.drop { $0 == "#" }.trimmingCharacters(in: .whitespaces)
+            return title.isEmpty ? nil : title
+        }
+        if let first = rawLine.first, first.isUppercase, trimmed.hasSuffix(":"), trimmed.count < 100,
+           !trimmed.hasPrefix("-"), !trimmed.contains("http") {
+            return String(trimmed.dropLast())
+        }
+        return nil
     }
 }

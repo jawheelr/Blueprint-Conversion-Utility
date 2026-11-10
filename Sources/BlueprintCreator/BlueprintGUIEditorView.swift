@@ -81,6 +81,9 @@ struct BlueprintGUIEditorView: View {
                     Button("Profile Inspector") { model.showProfileInspector = true }
                         .disabled(model.profileInspection == nil || model.profileInspectionLoading)
                         .help(model.profileInspectionLoading ? "Profile Inspector is still parsing the selected profile." : model.profileInspection == nil ? "Profile Inspector becomes available after the selected profile has been evaluated and parsed." : "Open the Profile Inspector for the evaluated profile. Review configured keys, recommendations, destination representation, unresolved decisions, and whether a setting is native, wrapped, or unknown.")
+                    Button { model.showAdvisor = true } label: { Label("Explain & Recommend", systemImage: "sparkles") }
+                        .disabled(model.selectedProfile == nil)
+                        .help("Plain-language summary of what was skipped or changed, what you need to do, and why. Advice only; it never changes or deploys anything.")
                     Button("View Analysis") { advanced = true; advancedTab = 0 }
                         .help("Open the full evaluation summary and raw jamf-cli activity for the selected profile.")
                     Spacer()

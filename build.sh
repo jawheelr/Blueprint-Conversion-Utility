@@ -135,6 +135,26 @@ fi
 [[ -z "$JAMF_CLI_SOURCE" ]] || cp "$JAMF_CLI_SOURCE" "$STAGE_APP/Contents/Resources/bin/jamf-cli"
 [[ -z "$CONVERTER_SOURCE" ]] || cp "$CONVERTER_SOURCE" "$STAGE_APP/Contents/Resources/bin/blueprint-profile-convert"
 
+echo "==> Building advisor reference index"
+# Offline, version-matched reference text for the in-app Explain & Recommend helper:
+# the bundled jamf-cli's own help text plus two vendored jamf-cli docs (MIT).
+ADVISOR_DIR="$ARTIFACTS/advisor"
+mkdir -p "$ADVISOR_DIR" "$STAGE_APP/Contents/Resources/Advisor"
+"$JAMF_CLI_SOURCE" pro blueprints import-profile --help > "$ADVISOR_DIR/import-profile-help.txt" 2>&1 || true
+"$JAMF_CLI_SOURCE" pro blueprints --help > "$ADVISOR_DIR/blueprints-help.txt" 2>&1 || true
+ADVISOR_INDEX="$ADVISOR_DIR/jamf-cli-$JAMF_CLI_VERSION.json"
+ADVISOR_ARGS=(--version "$JAMF_CLI_VERSION" --out "$ADVISOR_INDEX"
+  --source "pro blueprints import-profile --help|$ADVISOR_DIR/import-profile-help.txt"
+  --source "pro blueprints --help|$ADVISOR_DIR/blueprints-help.txt")
+for doc in "blueprints payload type registry|Vendor/jamf-cli/docs/solutions/logic-errors/blueprints-payload-type-registry-2026-07-28.md" \
+           "glossary|Vendor/jamf-cli/docs/GLOSSARY.md"; do
+  [[ -f "${doc#*|}" ]] && ADVISOR_ARGS+=(--source "$doc")
+done
+"$SWIFT_BIN/bcu" build-advisor-index "${ADVISOR_ARGS[@]}"
+[[ -s "$ADVISOR_INDEX" ]] || { echo "ERROR: advisor index was not produced." >&2; false; }
+cp "$ADVISOR_INDEX" "$STAGE_APP/Contents/Resources/Advisor/"
+[[ -f Vendor/jamf-cli/LICENSE ]] && cp Vendor/jamf-cli/LICENSE "$STAGE_APP/Contents/Resources/Advisor/jamf-cli-LICENSE.txt"
+
 echo "==> Assembling staged application bundle"
 cp "$SWIFT_BIN/BlueprintCreator" "$STAGE_APP/Contents/MacOS/BlueprintCreator"
 cp "$SWIFT_BIN/bcu" "$STAGE_APP/Contents/Resources/bin/bcu"

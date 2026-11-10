@@ -7,6 +7,7 @@ private enum KBTopic: String, CaseIterable, Identifiable {
     case workflow = "Conversion Workflow"
     case profileInspector = "Profile Inspector"
     case takeover = "Profile Takeover Walkthrough"
+    case explain = "Explain & Recommend"
     case editor = "GUI and JSON Editor Walkthrough"
     case platform = "Platform API"
     case cli = "jamf-cli"
@@ -122,6 +123,14 @@ struct KnowledgeBaseView: View {
             ])
             note("Every destructive phase is gated. A creation failure prevents distribution. A distribution failure prevents source-profile modification.")
 
+        case .explain:
+            heading("Explain & Recommend", "Plain-language help for what a conversion changed")
+            paragraph("Explain & Recommend turns jamf-cli warnings and the source profile's scope into a short list of what to change, what to review, and why. Open it from the Recommended Approach card, the Help menu, or the info icons next to takeover messages.")
+            subsection("What it does and does not do")
+            bullets(["It is advice only. It never creates, deploys, edits or unscopes anything.", "Built-in rules explain each message, such as skipped payload types, settings kept in the profile wrapper, removed payloads, and scope that blueprints cannot carry over.", "Excerpts from the bundled jamf-cli documentation are shown next to a tip when one matches, with the source named. They come from the jamf-cli version bundled in this app and are never downloaded.", "On a Mac with Apple Intelligence, Apple's on-device model also writes the summary at the top. Everything stays on the Mac."])
+            subsection("What the model can see")
+            paragraph("Only finding categories, payload type names, counts and the documentation excerpts. Profile contents, credentials, device data, tokens and raw jamf-cli output are not sent to the model.")
+            note("Without Apple Intelligence, or before macOS 26, the same panel works with built-in guidance only. Treat the rule-based text as the record of what was skipped or changed; the summary only rephrases it.")
         case .takeover:
             heading("Profile Takeover Walkthrough", "Evaluate and import an existing profile safely")
             numbered([
@@ -276,6 +285,7 @@ struct KnowledgeBaseView: View {
         case .workflow: return "arrow.triangle.2.circlepath"
         case .profileInspector: return "doc.text.magnifyingglass"
         case .takeover: return "arrow.trianglehead.2.clockwise.rotate.90"
+        case .explain: return "sparkles"
         case .editor: return "slider.horizontal.3"
         case .platform: return "network"
         case .cli: return "terminal"
