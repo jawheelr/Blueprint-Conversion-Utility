@@ -32,7 +32,7 @@ actor TakeoverImportService {
                     "--environment-id", settings.environmentID,
                     "--url", settings.platformURL,
                     "--no-input", "--no-update-check", "--no-color"]
-        if importMode == .convert { args.append("--convert") }
+        // Converting is jamf-cli's default (--convert is deprecated), so nothing is passed for .convert.
         if stripDefaults { args.append("--strip-defaults") }
         if skipExclusions { args.append("--skip-exclusions") }
         if skipLimitations { args.append("--skip-limitations") }
