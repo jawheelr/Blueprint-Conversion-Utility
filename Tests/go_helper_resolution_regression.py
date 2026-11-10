@@ -6,8 +6,10 @@ checks={
 'project binaries':'Resources/bin/$name' in s,
 'managed binaries':'$HOME/.local/bin/$name' in s,
 'path binaries':'command -v "$name"' in s,
-'compile only complete':'if [[ "$JAMF_SOURCE_COMPLETE" -eq 1' in s,
-'runnable fallback':'Building a runnable BCU app without bundled helpers' in s,
+'compile only complete':'[[ "$JAMF_SOURCE_COMPLETE" -eq 1' in s,
+'official jamf-cli release':'Jamf-Concepts/jamf-cli/releases/download' in s,
+'jamf-cli checksum verified':'shasum -a 256' in s and 'checksum mismatch' in s,
+'takeover capability required':'--takeover-only' in s,
 'optional helper copy':'[[ -z "$JAMF_CLI_SOURCE" ]] || cp' in s,
 'dynamic signing':'find "$STAGE_APP/Contents/Resources/bin" -type f' in s,
 }

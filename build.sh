@@ -96,25 +96,41 @@ find_helper() {
   done
   return 1
 }
-JAMF_SOURCE_COMPLETE=1
-for package in config gateway privileges output xmlconv keychain platform registry exitcode cooldown spinner httptransport; do
-  [[ -d "Vendor/jamf-cli/internal/$package" ]] || JAMF_SOURCE_COMPLETE=0
-done
-JAMF_CLI_SOURCE="$(find_helper jamf-cli || true)"
+JAMF_CLI_VERSION="${BCU_JAMF_CLI_VERSION:-1.36.0}"
+JAMF_CLI_SOURCE="${BCU_JAMF_CLI_PATH:-}"
+if [[ -z "$JAMF_CLI_SOURCE" ]]; then
+  # The vendored jamf-cli source is an older snapshot without the Takeover flags
+  # (--takeover-only, --deploy), so bundle the official release instead.
+  echo "Downloading official jamf-cli v$JAMF_CLI_VERSION release."
+  JAMF_DL="$ARTIFACTS/jamf-cli-release"
+  JAMF_BASE="https://github.com/Jamf-Concepts/jamf-cli/releases/download/v$JAMF_CLI_VERSION"
+  JAMF_TAR="jamf-cli-$JAMF_CLI_VERSION-darwin-universal.tar.gz"
+  mkdir -p "$JAMF_DL/x"
+  curl -fsSL --proto '=https' -o "$JAMF_DL/$JAMF_TAR" "$JAMF_BASE/$JAMF_TAR"
+  curl -fsSL --proto '=https' -o "$JAMF_DL/checksums.txt" "$JAMF_BASE/checksums.txt"
+  EXPECTED_SHA="$(awk -v f="$JAMF_TAR" '$2==f {print $1}' "$JAMF_DL/checksums.txt")"
+  ACTUAL_SHA="$(shasum -a 256 "$JAMF_DL/$JAMF_TAR" | awk '{print $1}')"
+  [[ -n "$EXPECTED_SHA" && "$EXPECTED_SHA" == "$ACTUAL_SHA" ]] || { echo "ERROR: jamf-cli checksum mismatch or missing for $JAMF_TAR." >&2; false; }
+  tar -xzf "$JAMF_DL/$JAMF_TAR" -C "$JAMF_DL/x"
+  JAMF_CLI_SOURCE="$JAMF_DL/x/jamf-cli"
+fi
+[[ -f "$JAMF_CLI_SOURCE" && -x "$JAMF_CLI_SOURCE" ]] || { echo "ERROR: jamf-cli helper not found at $JAMF_CLI_SOURCE." >&2; false; }
+IMPORT_HELP="$("$JAMF_CLI_SOURCE" pro blueprints import-profile --help 2>&1 || true)"
+grep -q -- "--takeover-only" <<<"$IMPORT_HELP" || { echo "ERROR: jamf-cli lacks 'import-profile --takeover-only'; BCU Takeover needs it." >&2; false; }
+echo "jamf-cli: $("$JAMF_CLI_SOURCE" version 2>&1 | head -1)"
+
 CONVERTER_SOURCE="$(find_helper blueprint-profile-convert || true)"
-if [[ -z "$JAMF_CLI_SOURCE" || -z "$CONVERTER_SOURCE" ]]; then
-  if [[ "$JAMF_SOURCE_COMPLETE" -eq 1 && -f Vendor/jamf-cli/go.mod ]]; then
-    echo "Complete vendored jamf-cli source detected; compiling helpers."
-    pushd Vendor/jamf-cli >/dev/null
-    GOOS=darwin GOARCH="$ARCH" CGO_ENABLED=0 go build -mod=mod -trimpath -ldflags="-s -w" -o "$OLDPWD/$GO_BIN_DIR/jamf-cli" ./cmd/jamf-cli
-    GOOS=darwin GOARCH="$ARCH" CGO_ENABLED=0 go build -mod=mod -trimpath -ldflags="-s -w" -o "$OLDPWD/$GO_BIN_DIR/blueprint-profile-convert" ./cmd/blueprint-profile-convert
-    popd >/dev/null
-    JAMF_CLI_SOURCE="$GO_BIN_DIR/jamf-cli"; CONVERTER_SOURCE="$GO_BIN_DIR/blueprint-profile-convert"
-  else
-    echo "WARNING: The included jamf-cli source snapshot is incomplete and cannot be compiled."
-    echo "WARNING: Building a runnable BCU app without bundled helpers."
-    echo "WARNING: Put prebuilt jamf-cli and blueprint-profile-convert in Resources/bin or ~/.local/bin and rebuild to enable helper-backed operations."
-  fi
+if [[ -z "$CONVERTER_SOURCE" ]]; then
+  JAMF_SOURCE_COMPLETE=1
+  for package in config gateway privileges output xmlconv keychain platform registry exitcode cooldown spinner httptransport; do
+    [[ -d "Vendor/jamf-cli/internal/$package" ]] || JAMF_SOURCE_COMPLETE=0
+  done
+  [[ "$JAMF_SOURCE_COMPLETE" -eq 1 && -f Vendor/jamf-cli/go.mod ]] || { echo "ERROR: blueprint-profile-convert not found and vendored source is incomplete." >&2; false; }
+  echo "Compiling blueprint-profile-convert from vendored source."
+  pushd Vendor/jamf-cli >/dev/null
+  GOOS=darwin GOARCH="$ARCH" CGO_ENABLED=0 go build -mod=mod -trimpath -ldflags="-s -w" -o "$OLDPWD/$GO_BIN_DIR/blueprint-profile-convert" ./cmd/blueprint-profile-convert
+  popd >/dev/null
+  CONVERTER_SOURCE="$GO_BIN_DIR/blueprint-profile-convert"
 fi
 [[ -z "$JAMF_CLI_SOURCE" ]] || cp "$JAMF_CLI_SOURCE" "$STAGE_APP/Contents/Resources/bin/jamf-cli"
 [[ -z "$CONVERTER_SOURCE" ]] || cp "$CONVERTER_SOURCE" "$STAGE_APP/Contents/Resources/bin/blueprint-profile-convert"

@@ -38,7 +38,10 @@ actor TakeoverImportService {
         if skipLimitations { args.append("--skip-limitations") }
         if includeUnsupported { args.append("--include-unsupported") }
         if dryRun { args.append("--dry-run") }
-        if !dryRun && importMode == .preserveInstalled { args.append("--takeover-only") }
+        // Preview evaluates takeover with --takeover (a profile that cannot take over
+        // still previews, with the reasons); creation uses --takeover-only so nothing
+        // is created unless the blueprint can adopt the installed profile.
+        if importMode == .preserveInstalled { args.append(dryRun ? "--takeover" : "--takeover-only") }
         if !dryRun && deploymentIntent.requestsDeployment { args.append("--deploy") }
         if scopeMode == .overrideSelected, let group {
             args += [mobile ? "--mobile-device-group" : "--computer-group", group.name]
@@ -53,16 +56,27 @@ actor TakeoverImportService {
         let lower = combined.lowercased()
         let unsupportedTakeoverPhrases = ["takeover not supported", "takeover is not supported", "takeover is unsupported", "takeover not possible", "takeover is not possible", "cannot take over", "converting the profile rather than keeping it as installed"]
         let takeoverIsUnsupported = unsupportedTakeoverPhrases.contains { lower.contains($0) }
+        // jamf-cli preview ends with: [dry-run] Would create blueprint "..." (takeover <label>)
+        let dryRunLabel: String? = combined.split(separator: "\n").compactMap { line -> String? in
+            let text = String(line)
+            guard text.lowercased().contains("[dry-run] would create blueprint"),
+                  let open = text.range(of: "(takeover ", options: .backwards),
+                  let close = text.range(of: ")", options: .backwards), open.upperBound <= close.lowerBound
+            else { return nil }
+            return String(text[open.upperBound..<close.lowerBound]).trimmingCharacters(in: .whitespaces).lowercased()
+        }.last
+        let labelUnsupported = dryRunLabel.map { $0.hasPrefix("not supported") || $0.hasPrefix("unsupported") || $0.hasPrefix("not possible") } ?? false
+        let labelSupported = dryRunLabel.map { !labelUnsupported && ($0 == "supported" || $0.hasPrefix("supported") || $0 == "possible" || $0.hasPrefix("will take over") || $0.hasPrefix("can take over")) } ?? false
         let verdict: TakeoverVerdict
-        if takeoverIsUnsupported { verdict = .unsupported }
-        else if lower.contains("takeover supported") { verdict = .supported }
+        if takeoverIsUnsupported || labelUnsupported { verdict = .unsupported }
+        else if lower.contains("takeover supported") || labelSupported { verdict = .supported }
         else if result.exitCode != 0 { verdict = .failed }
         else if dryRun { verdict = .previewGenerated }
         else { verdict = .unknown }
         let lines = combined.split(separator: "\n").map(String.init)
         let messages = lines.filter { line in
             let value = line.lowercased()
-            return value.contains("takeover supported") || unsupportedTakeoverPhrases.contains(where: { value.contains($0) }) || value.contains("refused") || value.contains("warning:")
+            return value.contains("[dry-run] would create blueprint") || value.contains("takeover supported") || unsupportedTakeoverPhrases.contains(where: { value.contains($0) }) || value.contains("refused") || value.contains("warning:")
         }
         let dropped = lines.filter { $0.lowercased().contains("dropped") || $0.lowercased().contains("discarded") }
         return TakeoverImportResult(stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode, verdict: verdict, messages: messages, droppedKeys: dropped)
