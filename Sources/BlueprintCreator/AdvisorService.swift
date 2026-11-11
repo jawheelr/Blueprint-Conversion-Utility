@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 #if canImport(FoundationModels)
 import FoundationModels
 #endif
@@ -16,6 +17,49 @@ enum AdvisorSource: Sendable, Equatable {
     }
 }
 
+/// Why the AI-written summary is not being shown, when the user can do something about it.
+enum AdvisorAIHint: Sendable, Equatable {
+    /// Apple Intelligence is off in System Settings.
+    case appleIntelligenceOff
+    /// The user turned the AI summary off in this app's settings.
+    case disabledInApp
+}
+
+enum AdvisorPreferences {
+    static let key = "advisorUseOnDeviceAI"
+
+    /// On by default; the user can turn it off in Settings > Explain & Recommend.
+    static var useOnDeviceAI: Bool {
+        get { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: key) }
+    }
+
+    /// Opens the Apple Intelligence pane of System Settings (falls back to the app itself).
+    @MainActor static func openAppleIntelligenceSettings() {
+        let candidates = ["x-apple.systempreferences:com.apple.Siri-Settings.extension",
+                          "x-apple.systempreferences:com.apple.preference.speech",
+                          "x-apple.systempreferences:"]
+        for text in candidates {
+            if let url = URL(string: text), NSWorkspace.shared.open(url) { return }
+        }
+    }
+
+    /// Current state of Apple's on-device model, for the settings screen.
+    static func deviceStatus() -> String {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            switch AdvisorModel.availability() {
+            case .available: return "Apple Intelligence is on. The on-device model is ready."
+            case .unavailable(let reason, _): return reason
+            }
+        }
+        return "On-device AI needs macOS 26 or later."
+        #else
+        return "This build does not include on-device AI support."
+        #endif
+    }
+}
+
 struct AdvisorItem: Identifiable, Hashable, Sendable {
     let finding: AdvisorFinding
     /// Best-matching jamf-cli documentation excerpt, if the corpus is bundled.
@@ -30,10 +74,11 @@ struct AdvisorAdvice: Sendable, Equatable {
     var items: [AdvisorItem]
     var source: AdvisorSource
     var corpusVersion: String?
+    var aiHint: AdvisorAIHint?
 
     static func == (lhs: AdvisorAdvice, rhs: AdvisorAdvice) -> Bool {
         lhs.headline == rhs.headline && lhs.topChanges == rhs.topChanges && lhs.risks == rhs.risks
-            && lhs.items.map(\.id) == rhs.items.map(\.id) && lhs.source == rhs.source
+            && lhs.items.map(\.id) == rhs.items.map(\.id) && lhs.source == rhs.source && lhs.aiHint == rhs.aiHint
     }
 }
 
@@ -53,6 +98,11 @@ enum AdvisorService {
         let version = await index.versionLabel
         var advice = builtIn(items: items, reason: "Apple Intelligence is not used on this Mac.", corpusVersion: version)
         guard !items.isEmpty else { return advice }
+        guard AdvisorPreferences.useOnDeviceAI else {
+            advice.source = .builtIn(reason: "The on-device AI summary is turned off in Settings.")
+            advice.aiHint = .disabledInApp
+            return advice
+        }
 
         #if canImport(FoundationModels)
         if #available(macOS 26.0, *) {
@@ -73,8 +123,9 @@ enum AdvisorService {
                     advice.source = .builtIn(reason: "The on-device model could not produce a summary this time.")
                     AppLogger.ai.error("Advisor on-device summary failed: \(error.localizedDescription, privacy: .private)")
                 }
-            case .unavailable(let reason):
+            case .unavailable(let reason, let canEnable):
                 advice.source = .builtIn(reason: reason)
+                if canEnable { advice.aiHint = .appleIntelligenceOff }
                 AppLogger.ai.notice("Advisor on-device model unavailable")
             }
         } else {
@@ -141,20 +192,20 @@ struct AdvisorModelSummary: Sendable {
 
 @available(macOS 26.0, *)
 enum AdvisorModel {
-    enum Availability { case available; case unavailable(String) }
+    enum Availability { case available; case unavailable(String, canEnable: Bool) }
 
     static func availability() -> Availability {
         switch SystemLanguageModel.default.availability {
         case .available:
             return .available
         case .unavailable(.deviceNotEligible):
-            return .unavailable("This Mac does not support Apple Intelligence.")
+            return .unavailable("This Mac does not support Apple Intelligence.", canEnable: false)
         case .unavailable(.appleIntelligenceNotEnabled):
-            return .unavailable("Turn on Apple Intelligence in System Settings to add an AI-written summary.")
+            return .unavailable("Apple Intelligence is turned off.", canEnable: true)
         case .unavailable(.modelNotReady):
-            return .unavailable("The on-device model is still downloading.")
+            return .unavailable("The on-device model is still downloading.", canEnable: false)
         case .unavailable:
-            return .unavailable("The on-device model is unavailable.")
+            return .unavailable("The on-device model is unavailable.", canEnable: false)
         }
     }
 

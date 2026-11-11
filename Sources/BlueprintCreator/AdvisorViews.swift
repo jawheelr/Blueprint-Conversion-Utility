@@ -145,6 +145,7 @@ struct AdvisorPanel: View {
                 }
             }
         }
+        if let hint = advice.aiHint { aiPrompt(hint) }
         Text(advice.source.label).font(.caption).foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
         if let version = advice.corpusVersion {
@@ -152,10 +153,56 @@ struct AdvisorPanel: View {
         }
     }
 
+    @ViewBuilder
+    private func aiPrompt(_ hint: AdvisorAIHint) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(hint == .appleIntelligenceOff ? "Add an AI-written summary" : "AI-written summary is off",
+                  systemImage: "sparkles").font(.headline)
+            Text(hint == .appleIntelligenceOff
+                 ? "Apple Intelligence is turned off on this Mac. Turn it on in System Settings to get a plain-language summary written on your Mac. Nothing leaves your Mac, and the built-in guidance below still works without it."
+                 : "You turned the on-device AI summary off. Turn it back on to add a plain-language summary written on your Mac.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                if hint == .appleIntelligenceOff {
+                    Button("Open Apple Intelligence Settings") { AdvisorPreferences.openAppleIntelligenceSettings() }
+                    Button("Check Again") { model.refreshAdvice() }
+                } else {
+                    Button("Turn On AI Summary") { AdvisorPreferences.useOnDeviceAI = true; model.refreshAdvice() }
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.12)))
+    }
+
     private func section<Content: View>(_ title: String, @ViewBuilder _ body: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.headline)
             body()
         }
+    }
+}
+
+/// Settings tab: lets the user choose whether Explain & Recommend may use Apple's on-device model.
+struct AdvisorSettingsForm: View {
+    @EnvironmentObject var model: AppModel
+    @AppStorage(AdvisorPreferences.key) private var useAI = true
+    @State private var status = AdvisorPreferences.deviceStatus()
+
+    var body: some View {
+        Form {
+            Toggle("Use on-device AI to write the summary", isOn: $useAI)
+                .onChange(of: useAI) { _ in model.refreshAdvice() }
+            Text("When on, Explain & Recommend asks Apple's on-device model to summarise the findings in plain language. It runs on this Mac only. Profile contents and credentials are never sent to it. When off, or when the model is unavailable, built-in guidance is used.")
+                .font(.caption).foregroundStyle(.secondary)
+            LabeledContent("On-device model") { Text(status).foregroundStyle(.secondary) }
+            HStack {
+                Button("Open Apple Intelligence Settings") { AdvisorPreferences.openAppleIntelligenceSettings() }
+                Button("Refresh Status") { status = AdvisorPreferences.deviceStatus() }
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { status = AdvisorPreferences.deviceStatus() }
     }
 }

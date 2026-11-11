@@ -20,11 +20,12 @@ struct ConnectionsView: View {
                     Text("Connections").font(.largeTitle.bold())
                     Text(tab == 1
                          ? "Run a local, read-only jamf-cli diagnostic."
+                         : tab == 2 ? "Choose how recommendations are written."
                          : "Configure and test API connectivity.")
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if tab != 1 {
+                if tab == 0 {
                     Label(
                         model.ready ? "Ready" : "Setup required",
                         systemImage: model.ready
@@ -38,17 +39,18 @@ struct ConnectionsView: View {
             Picker("Connection", selection: $tab) {
                 Text("Platform API").tag(0)
                 Text("jamf-cli").tag(1)
+                Text("Explain & Recommend").tag(2)
             }
             .pickerStyle(.segmented)
-            .frame(width: 500)
+            .frame(width: 640)
             .frame(maxWidth: .infinity)
 
             GroupBox {
-                if tab == 0 { platformForm } else { jamfCLIForm }
+                if tab == 0 { platformForm } else if tab == 1 { jamfCLIForm } else { AdvisorSettingsForm() }
             }
             .frame(maxHeight: .infinity)
 
-            if tab != 1 {
+            if tab == 0 {
                 Text(message).font(.caption).foregroundStyle(.secondary)
             }
 
@@ -69,7 +71,7 @@ struct ConnectionsView: View {
                     }
                 }
                 .disabled(model.busy)
-            } else {
+            } else if tab == 1 {
                 Button(cliTestRunning ? "Testing..." : "Test jamf-cli") {
                     runCLITest()
                 }
@@ -79,7 +81,9 @@ struct ConnectionsView: View {
 
             Spacer()
 
-            if tab == 1 {
+            if tab == 2 {
+                Button("Close") { dismiss() }
+            } else if tab == 1 {
                 Button("Copy Output") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(cliTestOutput, forType: .string)

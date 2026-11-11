@@ -45,9 +45,17 @@ enum ProcessRunner {
             let err = Pipe()
             process.executableURL = executable
             process.arguments = arguments
-            if !environment.isEmpty {
-                process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+            // Child tools (jamf-cli reads ~/.config) must use the signed-in user's home,
+            // even if the app was launched from a shell that carried HOME=/var/root.
+            var base = ProcessInfo.processInfo.environment
+            if let entry = getpwuid(getuid()), let dir = entry.pointee.pw_dir {
+                base["HOME"] = String(cString: dir)
+                if let name = entry.pointee.pw_name {
+                    base["USER"] = String(cString: name)
+                    base["LOGNAME"] = String(cString: name)
+                }
             }
+            process.environment = base.merging(environment) { _, new in new }
             process.standardInput = FileHandle.nullDevice
             process.standardOutput = out
             process.standardError = err
