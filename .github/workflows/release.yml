@@ -102,9 +102,18 @@ jobs:
           set -euo pipefail
           umask 077
           printf '%s' "$NOTARY_API_KEY" > "$RUNNER_TEMP/notary.p8"
-          xcrun notarytool store-credentials BCU-Notary \
-            --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
-            --keychain "$BCU_SIGNING_KEYCHAIN" --no-validate >/dev/null
+          key_id="$(printf '%s' "$NOTARY_KEY_ID" | tr -d '[:space:]')"
+          issuer="$(printf '%s' "$NOTARY_ISSUER_ID" | tr -d '[:space:]')"
+          args=(--key "$RUNNER_TEMP/notary.p8" --key-id "$key_id" --keychain "$BCU_SIGNING_KEYCHAIN" --no-validate)
+          # Team API keys need an Issuer ID (a UUID). Individual keys must not send one.
+          if [[ -n "$issuer" ]]; then
+            if [[ ! "$issuer" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
+              echo "BCU_NOTARY_ISSUER_ID is not a UUID. Re-enter it from App Store Connect > Users and Access > Integrations (shown above the key list)."
+              exit 1
+            fi
+            args+=(--issuer "$issuer")
+          fi
+          xcrun notarytool store-credentials BCU-Notary "${args[@]}" >/dev/null
           rm -f "$RUNNER_TEMP/notary.p8"
           echo "BCU_NOTARY_PROFILE=BCU-Notary" >> "$GITHUB_ENV"
 
