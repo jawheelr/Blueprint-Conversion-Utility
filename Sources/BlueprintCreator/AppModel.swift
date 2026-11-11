@@ -931,6 +931,9 @@ final class AppModel: ObservableObject {
             if !concreteFailure { reasons.insert("Profile discovery completed without a final supported/unsupported verdict.", at: 0) }
         case .notEvaluated: recommendation = .analyzing; reasons = ["Waiting for jamf-cli discovery."]
         }
+        if recommendation == .evaluationIncomplete, let profile = selectedProfile, profile.scope.groupNames.isEmpty, selectedGroup == nil {
+            reasons.insert("No groups are associated with this profile and no target group is selected, so jamf-cli has no scope to evaluate against. Choose a compatible Platform group, then re-run the preview.", at: 0)
+        }
         recommendedApproach = recommendation
         recommendationReasons = reasons.isEmpty ? [recommendation.title] : Array(reasons.prefix(6))
         if !hasUserSelectedApproach { applySelectedApproach(recommendation, automatic: true) }
