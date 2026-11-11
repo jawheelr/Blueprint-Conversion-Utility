@@ -1,0 +1,41 @@
+name: CI
+
+# Pull requests build and test only. No secrets are used here, so a PR (including
+# one from a fork) can never reach the signing certificates.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: Vendor/jamf-cli/go.mod
+          cache: false
+      - name: Regression tests
+        run: |
+          for t in Tests/*.py; do
+            echo "== $t"
+            python3 -I "$t"
+          done
+      - name: Build (unsigned, not notarized)
+        run: bash build.sh --skip-notarization
+      - name: Verify the bundle
+        run: |
+          app="dist/Blueprint Conversion Utility.app"
+          test -d "$app/Contents/Resources/Advisor"
+          test -x "$app/Contents/Resources/bin/jamf-cli"

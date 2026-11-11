@@ -20,11 +20,12 @@ struct ConnectionsView: View {
                     Text("Connections").font(.largeTitle.bold())
                     Text(tab == 1
                          ? "Run a local, read-only jamf-cli diagnostic."
+                         : tab == 2 ? "Choose how recommendations are written."
                          : "Configure and test API connectivity.")
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if tab != 1 {
+                if tab == 0 {
                     Label(
                         model.ready ? "Ready" : "Setup required",
                         systemImage: model.ready
@@ -38,17 +39,18 @@ struct ConnectionsView: View {
             Picker("Connection", selection: $tab) {
                 Text("Platform API").tag(0)
                 Text("jamf-cli").tag(1)
+                Text("Explain & Recommend").tag(2)
             }
             .pickerStyle(.segmented)
-            .frame(width: 500)
+            .frame(width: 640)
             .frame(maxWidth: .infinity)
 
             GroupBox {
-                if tab == 0 { platformForm } else { jamfCLIForm }
+                if tab == 0 { platformForm } else if tab == 1 { jamfCLIForm } else { AdvisorSettingsForm() }
             }
             .frame(maxHeight: .infinity)
 
-            if tab != 1 {
+            if tab == 0 {
                 Text(message).font(.caption).foregroundStyle(.secondary)
             }
 
@@ -69,7 +71,7 @@ struct ConnectionsView: View {
                     }
                 }
                 .disabled(model.busy)
-            } else {
+            } else if tab == 1 {
                 Button(cliTestRunning ? "Testing..." : "Test jamf-cli") {
                     runCLITest()
                 }
@@ -79,7 +81,9 @@ struct ConnectionsView: View {
 
             Spacer()
 
-            if tab == 1 {
+            if tab == 2 {
+                Button("Close") { dismiss() }
+            } else if tab == 1 {
                 Button("Copy Output") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(cliTestOutput, forType: .string)
@@ -126,11 +130,41 @@ struct ConnectionsView: View {
             TextField("Platform API URL", text: $model.settings.platformURL)
             TextField("Client ID", text: $model.settings.platformClientID)
             SecureField("Client secret", text: $model.platformSecret)
-            TextField("Environment ID (use this or Tenant ID)", text: $model.settings.environmentID)
-            TextField("Tenant ID (use this or Environment ID)", text: $model.settings.tenantID)
-            Text("Specify exactly one scope identifier. Platform profile operations use the /proclassic gateway with the same Platform OAuth token.")
+            TextField("Platform Environment ID", text: $model.settings.environmentID)
+            Text("Enter the Platform Environment ID selected when the API Client was created. All scoped requests use X-Environment-Id.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            DatePicker(
+                "API Client expiration date",
+                selection: Binding(
+                    get: {
+                        model.settings.integrationExpirationDate
+                            ?? Calendar.current.startOfDay(for: Date())
+                    },
+                    set: { value in
+                        model.settings.integrationExpirationDate = value
+                        model.refreshPlatformCredentialHealth()
+                    }
+                ),
+                displayedComponents: .date
+            )
+            Stepper(
+                "Expiration warning: \(model.settings.expiryWarningDays) days",
+                value: $model.settings.expiryWarningDays,
+                in: 1...180
+            )
+            .onChange(of: model.settings.expiryWarningDays) { _ in
+                model.refreshPlatformCredentialHealth()
+            }
+            Text("Use the expiration date shown in the Jamf Platform API Client overview. The default warning period is 30 days.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if !model.settings.platformURL.isEmpty && !model.settings.hostIsKnownJamf {
+                Label("This host is not a recognized Jamf domain (jamfcloud.com or jamf.com). Your client secret is sent to it during authentication; confirm the URL is correct.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
             LabeledContent("Platform API test") {
                 Text(model.platformTested ? "Passed" : "Not tested")
                     .foregroundStyle(model.platformTested ? .green : .secondary)
@@ -141,7 +175,6 @@ struct ConnectionsView: View {
         .onChange(of: model.settings.platformClientID) { _ in model.platformTested = false }
         .onChange(of: model.platformSecret) { _ in model.platformTested = false }
         .onChange(of: model.settings.environmentID) { _ in model.platformTested = false }
-        .onChange(of: model.settings.tenantID) { _ in model.platformTested = false }
     }
 
     private var jamfCLIForm: some View {
@@ -181,27 +214,9 @@ struct ConnectionsView: View {
     }
 
     nonisolated private static func executeCLITest() -> CLITestResult {
-        let managed = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".local/bin/jamf-cli")
-        let bundled = Bundle.main.url(
-            forResource: "jamf-cli",
-            withExtension: nil,
-            subdirectory: "bin"
-        )
-
-        let executable: URL?
-        let source: String
-        if FileManager.default.isExecutableFile(atPath: managed.path) {
-            executable = managed
-            source = "Application-managed"
-        } else if let bundled,
-                  FileManager.default.isExecutableFile(atPath: bundled.path) {
-            executable = bundled
-            source = "Application bundle"
-        } else {
-            executable = nil
-            source = "Not found"
-        }
+        let executable = ManagedToolRepository.resolve("jamf-cli")
+        let source = executable == nil ? "Not found"
+            : (ManagedToolRepository.bundledTool("jamf-cli") != nil ? "Application bundle" : "Development copy")
 
         let timestamp = ISO8601DateFormatter().string(from: Date())
         guard let executable else {
@@ -215,7 +230,7 @@ struct ConnectionsView: View {
             jamf-cli --version
 
             Response
-            No executable was found in ~/.local/bin or the application bundle.
+            No jamf-cli executable was found in the application bundle.
 
             Exit code
             127

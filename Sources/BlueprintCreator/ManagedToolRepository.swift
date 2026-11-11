@@ -1,17 +1,35 @@
 import Foundation
-actor ManagedToolRepository {
-    static var directory: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin", isDirectory: true) }
-    static var jamfCLI: URL { directory.appendingPathComponent("jamf-cli") }
-    static var converter: URL { directory.appendingPathComponent("blueprint-profile-convert") }
-    func validatedConverter() throws -> URL {
-        try FileManager.default.createDirectory(at: Self.directory, withIntermediateDirectories: true)
-        if !FileManager.default.isExecutableFile(atPath: Self.converter.path) {
-            guard let bundled = Bundle.main.url(forResource:"blueprint-profile-convert",withExtension:nil,subdirectory:"bin") else { throw AppFailure.message("Bundled profile conversion helper is missing.") }
-            try install(bundled, to: Self.converter)
-        }
-        if !FileManager.default.isExecutableFile(atPath: Self.jamfCLI.path), let bundled = Bundle.main.url(forResource:"jamf-cli",withExtension:nil,subdirectory:"bin") { try install(bundled, to: Self.jamfCLI) }
-        guard FileManager.default.isExecutableFile(atPath: Self.converter.path) else { throw AppFailure.message("Managed helper is unavailable at \(Self.converter.path).") }
-        return Self.converter
+
+/// Locates the helper executables. Release builds run only the copies sealed
+/// inside the application bundle (covered by the app's code signature); a
+/// user-writable copy is never trusted, because any process running as the
+/// user could replace it.
+enum ManagedToolRepository {
+    static func bundledTool(_ name: String) -> URL? {
+        guard let url = Bundle.main.url(forResource: name, withExtension: nil, subdirectory: "bin"),
+              FileManager.default.isExecutableFile(atPath: url.path) else { return nil }
+        return url
     }
-    private func install(_ source:URL,to destination:URL)throws{let fm=FileManager.default;let staging=destination.deletingLastPathComponent().appendingPathComponent(".\(destination.lastPathComponent).new-\(UUID().uuidString)");defer{try? fm.removeItem(at:staging)};try fm.copyItem(at:source,to:staging);try fm.setAttributes([.posixPermissions:0o755],ofItemAtPath:staging.path);if fm.fileExists(atPath:destination.path){try fm.removeItem(at:destination)};try fm.moveItem(at:staging,to:destination)}
+
+    /// Development-only fallback for `swift run`, where there is no bundle.
+    private static func developmentTool(_ name: String) -> URL? {
+        #if DEBUG
+        let url = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".local/bin/\(name)")
+        return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
+        #else
+        return nil
+        #endif
+    }
+
+    static func resolve(_ name: String) -> URL? {
+        bundledTool(name) ?? developmentTool(name)
+    }
+
+    static func validatedConverter() throws -> URL {
+        guard let url = resolve("blueprint-profile-convert") else {
+            throw AppFailure.message("The bundled profile conversion helper is missing from the application.")
+        }
+        return url
+    }
 }

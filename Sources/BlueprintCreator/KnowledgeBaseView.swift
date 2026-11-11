@@ -2,8 +2,13 @@ import SwiftUI
 import AppKit
 
 private enum KBTopic: String, CaseIterable, Identifiable {
+    case adminStart = "Admin Start Guide"
     case overview = "Application Overview"
     case workflow = "Conversion Workflow"
+    case profileInspector = "Profile Inspector"
+    case takeover = "Profile Takeover Walkthrough"
+    case explain = "Explain & Recommend"
+    case editor = "GUI and JSON Editor Walkthrough"
     case platform = "Platform API"
     case cli = "jamf-cli"
     case payloads = "Payload Compatibility"
@@ -17,7 +22,7 @@ private enum KBTopic: String, CaseIterable, Identifiable {
 struct KnowledgeBaseView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    @State private var selection: KBTopic? = .overview
+    @State private var selection: KBTopic? = .adminStart
 
     var body: some View {
         NavigationSplitView {
@@ -28,7 +33,7 @@ struct KnowledgeBaseView: View {
         } detail: {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    article(selection ?? .overview)
+                    article(selection ?? .adminStart)
                 }
                 .frame(maxWidth: 760, alignment: .leading)
                 .padding(28)
@@ -52,6 +57,32 @@ struct KnowledgeBaseView: View {
     @ViewBuilder
     private func article(_ topic: KBTopic) -> some View {
         switch topic {
+        case .adminStart:
+            heading("Admin Start Guide", "Prepare, analyze, review, and deploy safely")
+            paragraph("Use this guide as the standard administrator workflow for production conversions.")
+            subsection("Before you begin")
+            bullets(["Confirm APIs ready.", "Start with a controlled Platform Device Group.", "Keep a rollback plan and do not unscope the source profile until deployment and representative-device behavior are validated."])
+            subsection("Administrator workflow")
+            numbered(["Configure and test Connections.", "Select a Configuration Profile and wait for profile-specific jamf-cli analysis.", "Review the Recommended Approach, then explicitly choose an alternative only when intended.", "Confirm Approach, Scope, and Target Group. Target Group appears below Scope when Choose Another Group is selected.", "Run Dry Run and review Advanced jamf-cli Activity for the currently selected profile.", "Create Only first, inspect the Blueprint, deploy to a controlled group, and validate representative devices.", "Authorize source-profile unscoping separately only after successful validation."])
+            subsection("Profile Inspector placement")
+            paragraph("After evaluation, Profile Inspector appears in the Recommended Approach card directly between Change Approach and View Analysis. It is enabled after profile parsing completes and always opens the inspector for the currently evaluated profile.")
+            subsection("Profile Inspector and recommendation decisions")
+            numbered(["Open Profile Inspector after the selected profile finishes loading.", "Use Expand Configured, Expand All, or the disclosure arrows to review nested settings.", "Click anywhere on a setting row to select it and review the recommendation, timing, reason, migration behavior, confidence, and evidence.", "For Review, Edit Before Conversion, Replace, or Remove findings, choose Resolve Before Continuing.", "Select Apply to Destination, Keep Source Value, or Review Later. Applying creates a destination override and never edits the Jamf source profile.", "Clear the Action Needed filter before final review and resolve each remaining recommendation intentionally."])
+            note("Destination override decisions are tied to the currently selected profile and are cleared when another profile is selected.")
+            paragraph("Hover over every recommendation badge for action-specific guidance. Keep, Convert, Edit Before Conversion, Replace, Remove, Preserve as Legacy, Review, and Metadata each explain what the action means, when to use it, and whether the likely destination is a native component or a configuration-profile wrapper. In the decision sheet, each Decision option also provides its own detailed tooltip.")
+            subsection("Understanding destination decisions")
+            paragraph("A Profile Inspector recommendation describes the intended destination treatment, not an immediate change to the Jamf source profile. The source remains read-only. Apply to Destination records an administrator-approved destination override; Keep Source Value preserves the configured value using the best supported representation; Review Later leaves the finding unresolved for later review.")
+            bullets(["Keep: Preserve a current setting without semantic change.", "Convert: Translate a structured setting into the supported destination representation.", "Edit Before Conversion: Confirm or change the intended destination value before final Blueprint generation.", "Replace: Review a deprecated setting and choose its modern destination representation when one exists.", "Remove: Do not carry an Apple-removed setting forward without a supported replacement.", "Preserve as Legacy: Keep vendor-defined or wildcard content in a configuration-profile wrapper.", "Review: BCU cannot make a safe automatic decision.", "Metadata: Preserve payload identity and descriptive fields unless references are rewritten together."])
+            subsection("Native Blueprint components and profile wrappers")
+            paragraph("A native Blueprint or DDM component may be editable in the Jamf Blueprint GUI when Jamf exposes that component and property. Acceptance through the API does not guarantee a complete GUI editor. If Apple or Jamf provides no native equivalent, BCU preserves the key in a configuration-profile wrapper. Wrapped content remains part of the Blueprint, but individual wrapped keys may require BCU, profile-content replacement, or API editing later.")
+            note("A dry-run message such as 'kept in profile wrapper' means behavior was preserved as profile content; it does not mean the key became a native Jamf GUI control.")
+            subsection("Decision fields")
+            bullets(["Proposed destination value or instruction records the intended destination value or handling note.", "For Boolean settings, use true or false.", "Confidence describes the strength of the evidence, not whether Jamf offers GUI editing.", "Evidence identifies the Apple lifecycle, schema match, configured value, payload type, or BCU compatibility rule that produced the recommendation.", "Schema Match Exact means Apple defines the key at the current nested path; Wildcard means Apple allows arbitrary vendor keys there; Unknown requires administrator review."])
+            warning("In this development stage, verify on Review that an Apply to Destination decision changes the generated Blueprint JSON before relying on the decision for production deployment. If the JSON does not change, treat the saved value as a recorded administrator decision rather than an applied transformation.")
+            subsection("Apple Schema Browser")
+            paragraph("The Apple Schema Browser is a Help-menu reference and diagnostic tool. It supports full-row selection, disclosure expansion, search-path expansion, wider wrapped details, and Expand All, Collapse All, and Expand Configured controls. Normal migrations should use Profile Inspector; use the Schema Browser to inspect Apple definitions or troubleshoot a schema match.")
+            note("Analysis may refresh the recommendation, but it must not overwrite an explicit administrator-selected Approach.")
+            warning("Blueprint creation or an initial deployment request is not proof that devices adopted the intended state.")
         case .overview:
             heading("Application Overview", "What Blueprint Conversion Utility does")
             paragraph("Blueprint Conversion Utility migrates computer and mobile-device configuration profiles into Jamf Platform Blueprints. All network operations use Platform OAuth against the regional api.jamfcloud.com host.")
@@ -64,6 +95,21 @@ struct KnowledgeBaseView: View {
             ])
             note("The /proclassic path describes the resource family exposed by Jamf Platform. The app does not use a separate Jamf Pro URL, credential, or token.")
 
+        case .profileInspector:
+            heading("Profile Inspector", "Evaluate settings, resolve recommendations, and understand destination editability")
+            paragraph("Profile Inspector appears in the Recommended Approach card after evaluation, directly between Change Approach and View Analysis. The global application-header shortcut was removed so the inspector is opened only in the context of the evaluated profile.")
+            subsection("Opening and navigating")
+            numbered(["Select a Configuration Profile and wait for evaluation and profile parsing to finish.", "In Recommended Approach, choose Profile Inspector.", "Click anywhere in a setting row to select it.", "Use Expand Configured, Expand All, Collapse All, search, and Action Needed to focus the review.", "Hover over a recommendation badge or select its information button for the full explanation."])
+            subsection("Recommendation meanings")
+            bullets(["Keep: Preserve a current Apple-defined setting unless another conversion finding conflicts.", "Convert: Translate a structured setting into the supported Blueprint destination while preserving nested relationships.", "Edit Before Conversion: Confirm or change the intended destination before Blueprint creation.", "Replace: Prefer a modern representation for a deprecated setting when one exists; this does not automatically mean changing a Boolean value.", "Remove: Do not carry an Apple-removed or unsupported setting forward without a supported replacement.", "Preserve as Legacy: Keep vendor-defined or wildcard content in a configuration-profile wrapper.", "Review: BCU cannot safely choose the destination automatically.", "Metadata: Preserve identifiers, UUIDs, and descriptive values unless every related reference is rewritten together."])
+            subsection("Resolve Before Continuing")
+            paragraph("Action-needed settings provide Resolve Before Continuing. Each Decision is explained beside the choice and through hover help.")
+            bullets(["Apply to Destination: Record an administrator-approved destination override. The Jamf source profile is never edited.", "Keep Source Value: Preserve the source value using a native destination when available or a configuration-profile wrapper otherwise.", "Review Later: Leave the recommendation unresolved. Dry Run may continue, but the finding remains visible for later review."])
+            subsection("Native components and profile wrappers")
+            paragraph("A native Blueprint or DDM component may be editable in the Jamf Blueprint GUI when Jamf exposes that component and property. API acceptance alone does not guarantee a GUI editor. If no native equivalent exists, BCU preserves the key in a configuration-profile wrapper. Wrapped keys may require BCU, replacement profile content, or API editing later.")
+            note("A dry-run message saying a key was kept in a profile wrapper means the behavior was preserved as profile content; it did not become a native Jamf GUI control.")
+            subsection("Before production deployment")
+            warning("Verify on Review that every Apply to Destination decision changes the generated Blueprint JSON as intended. If the JSON does not change, treat the item as a recorded decision rather than an applied transformation.")
         case .workflow:
             heading("Conversion Workflow", "The phases executed for each profile")
             numbered([
@@ -77,9 +123,42 @@ struct KnowledgeBaseView: View {
             ])
             note("Every destructive phase is gated. A creation failure prevents distribution. A distribution failure prevents source-profile modification.")
 
+        case .explain:
+            heading("Explain & Recommend", "Plain-language help for what a conversion changed")
+            paragraph("Explain & Recommend turns jamf-cli warnings and the source profile's scope into a short list of what to change, what to review, and why. Open it from the Recommended Approach card, the Help menu, or the info icons next to takeover messages.")
+            subsection("What it does and does not do")
+            bullets(["It is advice only. It never creates, deploys, edits or unscopes anything.", "Built-in rules explain each message, such as skipped payload types, settings kept in the profile wrapper, removed payloads, and scope that blueprints cannot carry over.", "Excerpts from the bundled jamf-cli documentation are shown next to a tip when one matches, with the source named. They come from the jamf-cli version bundled in this app and are never downloaded.", "On a Mac with Apple Intelligence, Apple's on-device model also writes the summary at the top. Everything stays on the Mac."])
+            subsection("What the model can see")
+            paragraph("Only finding categories, payload type names, counts and the documentation excerpts. Profile contents, credentials, device data, tokens and raw jamf-cli output are not sent to the model.")
+            note("Without Apple Intelligence, or before macOS 26, the same panel works with built-in guidance only. Treat the rule-based text as the record of what was skipped or changed; the summary only rephrases it.")
+        case .takeover:
+            heading("Profile Takeover Walkthrough", "Evaluate and import an existing profile safely")
+            numbered([
+                "Select a computer or mobile configuration profile and wait for its details to finish loading.",
+                "Choose Profile Takeover in the GUI. The right pane changes to Blueprint Takeover.",
+                "BCU automatically runs public jamf-cli import-profile with --dry-run. Automatic evaluation cannot create or modify a Blueprint.",
+                "Review the supported, unsupported, or failed verdict and every reported reason.",
+                "Choose whether to preserve the source scope or replace it with a selected Platform group.",
+                "Use Re-evaluate after changing options. The Classic profile action remains Remain scoped.",
+                "Create the takeover Blueprint only after the verdict and scope are correct.",
+                "Verify device declaration status and settings on representative devices before changing the Classic profile."
+            ])
+            warning("An unsupported takeover can import alongside the Classic profile and may produce conflicting settings. The action button explicitly says Import Alongside Existing Profile in this state.")
+        case .editor:
+            heading("GUI and JSON Editor Walkthrough", "Edit one Blueprint through two synchronized views")
+            numbered([
+                "Choose GUI for guided fields or JSON for direct serialized editing.",
+                "In GUI, edit the Blueprint name, description, first step name, and activation condition.",
+                "Select or clear component checkboxes to control which standard-conversion components remain in steps[0].components.",
+                "Choose Apply GUI Changes to JSON to serialize the guided changes.",
+                "In JSON, edit advanced fields directly. Valid JSON refreshes the GUI model; invalid JSON keeps the last valid GUI values.",
+                "Choose Reload from JSON after a manual JSON edit, or Format and Load GUI to validate and normalize the document.",
+                "Review the Validation and Evaluation card before opening Deployment Review."
+            ])
+            note("Takeover identity and payload structure are generated by jamf-cli. The standard Blueprint editor does not rewrite identity-sensitive takeover payloads.")
         case .platform:
             heading("Platform API", "Connection and permissions")
-            paragraph("Connections requires the regional Platform URL, client ID, client secret, and exactly one Environment ID or Tenant ID. The client secret is stored in macOS Keychain.")
+            paragraph("Connections requires the regional Platform URL, client ID, client secret, and Platform Environment ID. The client secret is stored in macOS Keychain.")
             bullets([
                 "OAuth token endpoint: /auth/token",
                 "Mobile profiles: /proclassic/mobiledeviceconfigurationprofiles",
@@ -90,14 +169,13 @@ struct KnowledgeBaseView: View {
             subsection("Connection test")
             paragraph("The Platform test validates OAuth plus access to both computer and mobile configuration-profile collections. A successful token alone is not treated as a complete test.")
             subsection("Scope header")
-            paragraph("The app sends either X-Environment-Id or X-Tenant-Id. Supplying both is blocked because requests must have one unambiguous Platform scope.")
+            paragraph("The app sends X-Environment-Id for every scoped request using the configured Platform Environment ID.")
 
         case .cli:
             heading("jamf-cli", "How Jamf conversion code is used")
             paragraph("The application ships Jamf Concepts jamf-cli and a dedicated blueprint-profile-convert helper. The helper is compiled inside the Jamf CLI Go module so it can use internal/profileconvert directly.")
             bullets([
-                "Managed binary location: ~/.local/bin/jamf-cli",
-                "Managed converter location: ~/.local/bin/blueprint-profile-convert",
+                "Helper location: inside the application bundle (Contents/Resources/bin)",
                 "Bundled fallback location: the app's Contents/Resources/bin directory",
                 "Passcode payloads can become com.jamf.ddm.passcode-settings.",
                 "Supported Safari and software-update settings can become native DDM components.",
@@ -202,15 +280,20 @@ struct KnowledgeBaseView: View {
     }
     private func icon(for topic: KBTopic) -> String {
         switch topic {
-        case .overview: "app.badge"
-        case .workflow: "arrow.triangle.2.circlepath"
-        case .platform: "network"
-        case .cli: "terminal"
-        case .payloads: "shippingbox"
-        case .deployment: "paperplane"
-        case .groups: "person.3"
-        case .troubleshooting: "wrench.and.screwdriver"
-        case .updates: "arrow.down.circle"
+        case .adminStart: return "checklist"
+        case .overview: return "app.badge"
+        case .workflow: return "arrow.triangle.2.circlepath"
+        case .profileInspector: return "doc.text.magnifyingglass"
+        case .takeover: return "arrow.trianglehead.2.clockwise.rotate.90"
+        case .explain: return "sparkles"
+        case .editor: return "slider.horizontal.3"
+        case .platform: return "network"
+        case .cli: return "terminal"
+        case .payloads: return "shippingbox"
+        case .deployment: return "paperplane"
+        case .groups: return "person.3"
+        case .troubleshooting: return "wrench.and.screwdriver"
+        case .updates: return "arrow.down.circle"
         }
     }
 }

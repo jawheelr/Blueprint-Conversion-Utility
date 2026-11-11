@@ -64,24 +64,19 @@ struct LogsView: View {
     private func refresh() async {
         loading = true
         defer { loading = false }
-        let process = Process()
-        let output = Pipe()
-        let errors = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/log")
-        process.arguments = [
-            "show", "--style", "compact", "--last", interval,
-            "--predicate", predicate
-        ]
-        process.standardOutput = output
-        process.standardError = errors
         do {
-            try process.run()
-            process.waitUntilExit()
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            let errorData = errors.fileHandleForReading.readDataToEndOfFile()
-            let result = String(data: data, encoding: .utf8) ?? ""
-            let failure = String(data: errorData, encoding: .utf8) ?? ""
-            logText = result.isEmpty ? (failure.isEmpty ? "No matching log entries." : failure) : result
+            let result = try await ProcessRunner.run(
+                URL(fileURLWithPath: "/usr/bin/log"),
+                ["show", "--style", "compact", "--last", interval, "--predicate", predicate],
+                timeout: 90
+            )
+            var text = result.stdoutText
+            if text.count > 1_000_000 {
+                text = "[Showing the most recent entries only]\n" + String(text.suffix(1_000_000))
+            }
+            logText = text.isEmpty
+                ? (result.stderrText.isEmpty ? "No matching log entries." : result.stderrText)
+                : text
         } catch {
             logText = "Unable to query unified logging: \(error.localizedDescription)"
         }

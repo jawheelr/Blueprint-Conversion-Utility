@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.titlebarAppearsTransparent = true
             window.styleMask.insert(.fullSizeContentView)
             window.toolbarStyle = .unifiedCompact
+            window.standardWindowButton(.documentIconButton)?.isHidden = true
         }
     }
 

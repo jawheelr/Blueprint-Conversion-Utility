@@ -1,781 +1,211 @@
-# 🗺️ Blueprint Conversion Utility
+# Blueprint Conversion Utility 3.5.0 Complete
+Includes the 2.1.1 connection-state fix, 2.1.2 Jamf profile parser fix, icon resources, Keychain storage, both required API tests, and app/PKG/DMG build. Build without sudo: `xattr -dr com.apple.quarantine . && /bin/bash ./build.sh`.
 
-Blueprint Conversion Utility (BCU) is a macOS application for analyzing Jamf Pro computer and mobile-device Configuration Profiles and converting or taking them over as Jamf Platform Blueprints.
+## Version 3.5.0 scope migration workflow
 
-BCU is designed to guide administrators through the conversion process rather than simply translating configuration data. It analyzes the selected Configuration Profile, evaluates available Blueprint-compatible settings, reviews scope, identifies potential migration concerns, and provides a controlled workflow for creating and deploying the resulting Blueprint.
+- Reads profile scope, limitations, exclusions, and individual-device counts.
+- Preselects a Platform device group whose normalized name matches a scoped Jamf Pro group.
+- Displays a scope banner and warns when exactly one computer or mobile device is directly scoped.
+- Writes operational events to Apple Unified Logging under subsystem `com.jawheelr.blueprintcreator`.
+- Includes a View Logs window with time and category predicates, copy, refresh, and export controls.
+- Create Blueprint presents Create Only, Create and Deploy, and acknowledged Create/Deploy/Unscope choices.
+- The destructive sequence creates the blueprint, deploys it, then unscopes the source profile.
 
----
+## Hybrid Jamf backend in 3.5.0
 
-## 👀 Overview
+The Jamf Pro backend can run in Automatic, Native API, or jamf-cli mode. Automatic is the default. The utility discovers jamf-cli at the configured path and standard Homebrew/local paths, validates the executable directly with `Process`, records its version in Unified Logging, and uses native API compatibility operations whenever structured profile scope XML or safe source-profile unscoping is required. Platform device groups, blueprint creation, and deployment remain native Platform API operations. No secret or token is placed in jamf-cli process arguments.
 
-BCU helps administrators move Configuration Profile management toward Jamf Platform Blueprints while maintaining visibility into:
 
-- Source Configuration Profile settings
-- Scope and target groups
-- Blueprint-compatible payloads and components
-- Activation Conditions
-- Unsupported or dropped configuration keys
-- Recommended conversion or takeover strategy
-- Blueprint creation
-- Blueprint deployment
-- Deployment validation
-- Source-profile lifecycle actions
-- Activity history and application logs
+## Version 3.5.0 build correction
 
-BCU also integrates `jamf-cli` analysis into the workflow to provide additional guidance before changes are made.
+The jamf-cli command result now uses a dedicated `Sendable` result type rather than incompatible labeled and unlabeled tuple types. The subprocess runner executes inside the `JamfCLIService` actor, eliminating the concurrently-executed local continuation callback that produced the Swift 6 sendability warning.
 
----
 
-## 📋 Requirements
+## Version 3.5.0 build correction
 
-Before using BCU, make sure you have:
+The unified-log message in `JamfCLIService` is now a single `OSLogMessage` interpolation. Swift does not support concatenating two `OSLogMessage` values with `+`. The dedicated `Sendable` CLI result type and actor-isolated subprocess runner from 3.5.0 remain in place.
 
-- A supported macOS system
-- Access to your Jamf environment
-- Jamf Platform API credentials with the permissions required for the operations you intend to perform
-- Appropriate Jamf administrative permissions for the Configuration Profiles, groups, and Blueprints you will manage
 
-Your environment may require additional permissions depending on whether you are only analyzing configurations or also creating, deploying, taking over, or unscoping Configuration Profiles.
+## Version 3.5.0 XML parser build correction
 
----
+The complete `ProfileDetailParser` implementation has been restored. Version 2.3.8 accidentally truncated `XMLParsers.swift` immediately after assigning `result.payloads`, which removed the closing method/class braces and XML delegate methods. Version 3.5.0 preserves complete nested payload dictionaries while retaining all scope, description, and payload parsing callbacks.
 
-## 🚀 Getting Started
 
-Launch Blueprint Conversion Utility and configure the connection to your Jamf environment.
+## Version 3.5.0 deployment review and unscoping update
 
-BCU provides a guided workflow that generally follows these steps:
+The deployment review has been redesigned with centered, full-width blue action buttons, paired source/target cards, clearer group status, and conditional unscoping controls. Jamf Pro unscoping now retrieves the actual profile XML, changes only nodes already present in the returned scope, tries a scope-only document using the actual root element, and retries with the complete modified profile XML. Both HTTP responses are reported if Jamf Pro rejects both update strategies.
 
-1. 🔌 Configure and test the Jamf Platform API connection.
-2. 💻 Select **Computers** or **Mobile Devices**.
-3. 📄 Select a source Configuration Profile.
-4. 🔍 Allow BCU to analyze the selected profile.
-5. 🤖 Review the `jamf-cli` analysis and recommendation.
-6. 🎯 Review the source profile's scope.
-7. 👥 Select a compatible target group when required.
-8. 🧩 Review Blueprint properties and editable values.
-9. ⚙️ Review payloads, components, and Activation Conditions.
-10. 🧪 Run a **Dry Run**.
-11. ⚠️ Review warnings, dropped settings, and proposed changes.
-12. ✅ Disable Dry Run when you are ready to make changes.
-13. ▶️ Select the appropriate execution action.
-14. 🔄 Review the resulting Blueprint and deployment status.
-15. 🛡️ Perform any authorized source-profile lifecycle action.
-16. 📜 Review Activity and application logs as needed.
 
----
+## Version 3.5.0 distribution strategy
 
-> 🔑 **Jamf Platform API Setup**  
-> Follow the [Jamf Platform API Setup Guide](https://github.com/jawheelr/Blueprint-Conversion-Utility/blob/dad0c1789ea5e3f266275aef798040835e7153c8/PlatformAPISetup.md) to gather the API credentials and Platform Environment information required by BCU.
+When a scoped source profile is migrated, the deployment review now offers Redistribute to Original and New Groups or Distribute to New Group Only. Redistribute scopes the blueprint to the automatically matched original Platform group plus the newly selected group, deploys the blueprint, and then unscopes the source profile. Distribute to New Group Only deploys only to the newly selected Platform group and then unscopes the source profile. Profiles that are already unscoped receive the normal Distribute to New Group action.
 
-# 🔌 Connecting to Jamf
 
-BCU requires access to the Jamf APIs used by the application's analysis and Blueprint-management workflows.
+## Version 3.5.0 application-managed jamf-cli
 
-Enter the requested Jamf environment and credential information in BCU and use the connection test before attempting a conversion.
+Users can add a jamf-cli executable to the application context. The utility validates and copies it to `~/Library/Application Support/Blueprint Conversion Utility/CLI/jamf-cli`, gives the managed copy first discovery priority, and selects jamf-cli as the default blueprint-creation backend. Blueprint request JSON is passed through a temporary file, credentials are supplied through the subprocess environment rather than command-line arguments, and native Platform API creation is used automatically if the CLI command is unavailable or unsupported. Jamf Pro Classic API operations remain native for profile XML scope and unscoping compatibility.
 
-A successful connection test confirms that BCU can authenticate to the configured environment. Individual operations may still require additional API permissions.
 
-## 🔐 Credential Security
+## Version 3.5.0 title-bar and managed jamf-cli updater
 
-Treat Jamf API credentials as privileged administrative credentials.
+The visible macOS window title text is hidden while preserving normal window controls and sidebar behavior. At launch, the utility queries the official Jamf-Concepts/jamf-cli latest-release metadata, chooses a macOS Apple Silicon or universal asset, downloads and extracts it, validates the executable with `--version`, and atomically installs it within the application-support context. The previous managed copy is restored if validation fails. The app also inspects `--help` for blueprint capability. Current CLI releases without blueprint commands are not invoked for blueprint creation; the working native Platform API backend remains active while the managed CLI is available for supported operations.
 
-Use credentials that:
 
-- Follow the principle of least privilege
-- Are dedicated to the required BCU operations when practical
-- Can be rotated without affecting unrelated integrations
+## Version 3.5.0 adaptive conversion planner
 
----
+Each profile now receives a per-run payload compatibility plan. Verified legacy payloads are routed to the legacy configuration-profile component, payloads known to require a native component are blocked before submission, and unknown payloads are marked unverified rather than sent blindly. The mobile passcode payload is explicitly identified as requiring a verified native schema because the Platform rejected it in the legacy component. Platform groups retain computer/mobile/unknown family metadata and are filtered for the active workspace. Unknown-family groups remain visible with an explicit label. The three deployment actions and source-profile disposition popup remain phase protected.
 
-# 📄 Selecting a Configuration Profile
 
-BCU supports workflows for both:
+## Version 3.5.0 jamf-cli diagnostics tab
 
-- 💻 Computer Configuration Profiles
-- 📱 Mobile Device Configuration Profiles
+Connections now includes a dedicated `jamf-cli` tab. The tab has one diagnostic action, **Test jamf-cli**, and a contained scrollable monospaced output window. The test prefers the managed executable at `~/.local/bin/jamf-cli`, falls back to the app-bundled executable, runs only `--version`, and records the exact executable, source, query, stdout, stderr, exit code, duration, timestamp, and pass/fail result. Copy Output and Clear support simplify troubleshooting; no credentials, tokens, environment values, installation controls, update controls, path controls, or backend settings appear in the tab.
 
-Select the appropriate device category and then choose the Configuration Profile you want to analyze.
 
-Changing the selected Configuration Profile starts a new profile-specific analysis.
+## Version 3.5.0 Platform-only API architecture
 
-BCU clears authorization and state associated with the previously selected profile so that an earlier profile's conversion or deployment state cannot accidentally authorize lifecycle operations against a newly selected profile.
+All network operations use the Jamf Platform API hostname, Platform OAuth client credentials, and the Platform Environment scope header. Computer and mobile configuration-profile listing, detail retrieval, and XML updates now use the Platform-published `/proclassic/osxconfigurationprofiles` and `/proclassic/mobiledeviceconfigurationprofiles` resources. Blueprint groups, blueprint creation, and blueprint deployment continue through native Platform resources. The separate Jamf Pro URL, client ID, client secret, token cache, API connection test, and Connections tab have been removed. Existing Platform secrets are migrated from the prior Keychain payload when available. Source-profile unscoping performs a Platform gateway PUT followed by a Platform gateway GET and reports success only after read-back verifies the scope is empty.
 
----
 
-# 🔍 Automatic Analysis
+## Version 3.5.0 build correction
 
-After selecting a Configuration Profile, BCU analyzes the profile before execution options are presented.
+Removed the final stale `cliAvailable` reference from Platform profile loading and made the detached jamf-cli diagnostic helper explicitly `nonisolated`, resolving the Xcode 27 actor-isolation diagnostic. Profile loading now logs the Platform `/proclassic` gateway directly.
 
-The analysis is intended to help determine whether the configuration can be represented by a Jamf Platform Blueprint and what migration approach is appropriate.
 
-Depending on the selected profile, BCU may review:
+### Version 3.5.0 disabled payload filtering
 
-- Configuration payloads
-- Managed preferences
-- Blueprint-compatible settings
-- Unsupported configuration
-- Scope
-- Target groups
-- Activation Conditions
-- Existing Blueprint relationships
-- Migration implications
-- Potentially dropped configuration keys
+The bundled Jamf `profileconvert` helper now enables its Blueprints compatibility filter. Payload types that Jamf Blueprints explicitly disables, including `com.apple.security.root`, `com.apple.security.pkcs1`, and `com.apple.vpn.managed`, are removed from the legacy configuration-profile component before blueprint creation. Converter warnings remain available in the conversion plan so excluded payloads are visible to the operator. This release also retains semantic empty-scope verification from 3.0.3.
 
-The analysis should be allowed to complete before making conversion decisions.
 
----
+## Version 3.5.0 knowledge base and application updates
 
-# 🤖 `jamf-cli` Analysis
+The in-app Knowledge Base now documents the Platform-only architecture, conversion phases, bundled jamf-cli/profileconvert integration, payload compatibility and filtering, device groups, deployment safety, semantic unscoping, troubleshooting, and support workflows. The app checks `https://api.github.com/repos/jawheelr/Blueprint-Conversion-Utility/releases/latest` during launch and compares the release tag with the installed semantic version. A newer release opens a review window with release notes and a button to the official GitHub release page. Manual checks are available from the application menu and Knowledge Base. Updates are never installed silently.
 
-BCU integrates `jamf-cli` into the analysis process.
 
-When a Configuration Profile is selected, BCU automatically attempts to locate the appropriate `jamf-cli` installation and uses it as part of its analysis when available.
+## Version 3.5.0 weekly application update checks
 
-The administrator should not need to manually run `jamf-cli` for the standard BCU workflow.
+**Check for Updates...** is available under the Help menu alongside Knowledge Base and the GitHub project link. The application runs an automatic GitHub Releases check on first launch, then no more than once every seven days. The last-attempt date is stored in `UserDefaults` as `BlueprintCreator.LastAppUpdateCheck`. The attempt date is recorded before the request so an unavailable network does not cause requests on every launch. Manual checks remain available at any time and restart the seven-day schedule.
 
-BCU uses the resulting information to help explain the recommended migration path in administrator-friendly terms.
 
-## 🔄 Analysis Refresh
+## Version 3.5.0 application identity migration
 
-BCU keeps analysis associated with the currently selected Configuration Profile.
+The application bundle identifier, installer package identifier, generated profile payload identifier prefix, Keychain service, and Unified Logging subsystem are now `com.jawheelr.blueprintcreator`. On first launch under the new identity, the app imports saved settings and the weekly update-check date from the former `com.jarredwheeler.blueprintcreator` preferences domain when the new domain has no settings. Platform credentials are read from the new Keychain service first, then migrated from the previous service or the older two-secret payload. Existing legacy entries are left intact as a non-destructive fallback.
 
-Selecting another profile triggers fresh analysis rather than reusing the previous profile's results.
 
-This is particularly important when moving between profiles with different payloads, target groups, or deployment characteristics.
+## Version 3.5.0 sidebar and stable profile selection
 
----
+The profile type label is now a separate `PROFILE TYPE` heading above a full-width segmented control with its picker label hidden. The sidebar has a 260-point minimum width to prevent vertical label wrapping while remaining resizable. Profile-list selection is now keyed by profile ID rather than the mutable profile object. The selected row remains highlighted while details and conversion data load, displays an inline spinner, and ignores stale asynchronous responses when the user quickly selects another profile.
 
-# 💡 Recommendations
 
-BCU is designed to provide guidance rather than requiring administrators to interpret raw API information themselves.
+## Version 3.5.0 family-aware group auto-selection
 
-After analysis, review the recommendation presented by BCU.
+Platform device groups now load and filter before source profiles are evaluated, ensuring source scope matching can populate the Deployment picker. Mobile mode exposes only confirmed mobile/iOS/iPadOS/tvOS groups; computer mode exposes only confirmed computer/macOS groups. Matching first uses an exact case-insensitive source group name, then a punctuation- and whitespace-normalized name within the same device family. Group family detection recognizes additional Platform metadata fields. Logs record the source group, selected Platform group, family, and matching method.
 
-Depending on the configuration and current environment, BCU may indicate that the profile is suitable for:
 
-- Creating a new Blueprint
-- Creating and deploying a Blueprint
-- A takeover workflow
-- Additional review before migration
+## Version 3.5.0 resilient GitHub update checks
 
-> ⚠️ **Important:** Warnings should be resolved or understood before proceeding.
+Update discovery now uses the public GitHub `releases/latest` redirect instead of the rate-limited REST API. The final versioned release URL supplies the release tag, so no GitHub token is required. Successful automatic checks are scheduled every seven days; transient failures retry after 24 hours. Manual checks always run immediately and show friendly availability messages without exposing raw GitHub rate-limit JSON. This release also includes the 3.1.6 Swift compiler corrections and the one-hour default Unified Logs query.
 
----
 
-# 🎯 Scope Review
+## Version 3.5.0 guided update installation
 
-Before deploying a Blueprint, carefully review the scope of the source Configuration Profile.
+When a newer GitHub release is detected, the update window now offers **Download and Install**. The app derives the versioned PKG asset URL from the public release tag, downloads `Blueprint-Conversion-Utility-<version>.pkg`, verifies the XAR package header, stores the package with restricted permissions under `~/Library/Application Support/Blueprint Conversion Utility/Updates`, and opens the native macOS Installer. The user remains in control and completes Installer confirmation and any required administrator authorization. If the expected PKG asset is missing or invalid, no installer is opened and a clear error is shown.
 
-BCU displays the relevant scope information so that administrators can understand which devices or groups are currently receiving the configuration.
 
-This step is important because Blueprint deployment and Configuration Profile scope are separate lifecycle decisions.
+## Version 3.5.0 single application title
 
-> **Creating a Blueprint does not automatically mean that the source Configuration Profile should be removed from scope.**
+Removed the duplicate application name in the window toolbar while retaining the branded in-content header with the app icon, title, and subtitle. The detail navigation title and subtitle are explicitly empty, and the AppKit window configuration continues hiding the native title and document icon.
 
----
 
-# 👥 Target Groups
+### Version 3.5.0 deployment pane resizing
 
-When a Blueprint requires a target group, BCU allows you to select a compatible group from the Jamf environment.
+The Deployment pane no longer uses a fixed 320-point width. Both children of the horizontal split view now provide flexible minimum, ideal, and maximum widths, allowing the visible divider to resize the Deployment area as expected while preserving usable minimum widths for the generated Blueprint editor and Deployment controls.
 
-Choose the target intentionally.
 
-Do not assume that the source Configuration Profile's scope and the Blueprint target are automatically equivalent.
+## Version 3.5.0 update relaunch lifecycle
 
-BCU's workflow keeps target selection visible so that administrators can review the destination before deployment.
+After **Download and Install** validates the versioned PKG and opens macOS Installer, the current app launches a detached relaunch monitor and exits. The monitor watches the installed app bundle for up to 30 minutes. When `CFBundleShortVersionString` changes from the running version, the monitor opens the updated application. If installation is canceled or does not complete, the monitor expires without reopening the old version. macOS Installer remains responsible for package validation, user confirmation, and administrator authorization.
 
----
 
-# 🧩 Blueprint Configuration
+## Version 3.5.0 Environment-only credentials and expiration reminder
 
-Before execution, BCU presents the proposed Blueprint configuration for review.
+Connections now requires a Platform API URL, Client ID, Client Secret, Platform Environment ID, and API Client expiration date. Tenant ID has been removed from the UI, settings model, request clients, validation, and Platform headers. All scoped requests use `X-Environment-Id`. The footer reports credential health using calendar-day calculations: green when the tested credentials expire beyond the configured warning period, yellow when the expiration date is within the warning period (30 days by default), red when expired or authentication fails, and gray when expiration metadata is not configured or has not yet been tested. The expiration date and warning period are non-secret preferences; the Client Secret remains in macOS Keychain.
 
-Depending on the selected Configuration Profile and Blueprint type, this can include:
+### Required Platform API Client permissions
 
-- Blueprint name
-- Description
-- Editable text values
-- Selectable options
-- Payloads
-- Components
-- Activation Conditions
-- Target information
+- Deployment → Configuration Profiles: Read, Update
+- Inventory → Device Groups: Read, Update
+- Deployment → Blueprints: Deploy, Create, Read, Update
 
-Editable values should be reviewed before running a Dry Run or creating the Blueprint.
+Create the API Client at the **Platform Environment** level, select the appropriate Platform Environment, record the Client ID, save the Client Secret when it is shown, and copy the Platform Environment ID into Connections.
 
----
 
-# ⚙️ Payloads and Components
+## Version 3.5.0 first-round CLI and Developer ID build support
 
-BCU translates supported Configuration Profile settings into Blueprint-compatible configuration.
+The Swift package now produces a `bcu` terminal executable alongside the graphical app. The PKG installs `/usr/local/bin/bcu` as a symbolic link to the signed CLI inside the application bundle. Initial commands include version information, non-secret connection status and testing, credential expiration status, computer/mobile profile listing, strict family-filtered device-group listing, Unified Log viewing/streaming, opening the GUI, and checking the latest tagged GitHub release. Text and JSON output are supported for automation where applicable. The CLI reads the GUI's Platform settings and Keychain secret and never prints the Client Secret.
 
-Review the resulting payloads and components carefully.
+`build.sh` now accepts `--sign-app`, `--sign-installer`, `--notary-profile`, `--skip-notarization`, `--version`, and `--arch`. With no signing options, local ad hoc builds continue to work. Developer ID builds sign each nested executable, the main app, and the installer; optional notarization submits and staples the PKG and DMG.
 
-Not every Configuration Profile setting necessarily has a direct Blueprint equivalent.
+### CLI examples
 
-When possible, BCU identifies settings that cannot be represented so that the administrator can understand the difference between the source Configuration Profile and the resulting Blueprint.
+```bash
+bcu version
+bcu connection status
+bcu connection test
+bcu credentials status
+bcu profiles list --type computer
+bcu profiles list --type mobile --output json
+bcu groups list --type computer
+bcu logs show --last 1h
+bcu logs stream --category Deployment
+bcu app open
+bcu app check-for-updates
+```
 
----
+### Signed build example
 
-# ⚠️ Dropped or Unsupported Keys
+```bash
+./build.sh \
+  --sign-app "Developer ID Application: Your Name (TEAMID)" \
+  --sign-installer "Developer ID Installer: Your Name (TEAMID)" \
+  --notary-profile blueprint-notary
+```
 
-If configuration values cannot be represented in the resulting Blueprint, BCU exposes that information rather than silently treating the conversion as completely equivalent.
+## 3.5.0 Profile Takeover and GUI Editing
 
-Review dropped or unsupported keys before deployment.
+This isolated fork detects `jamf-cli pro blueprints import-profile --help` at application launch. When the command and expected flags are available, the Deployment Review changes from the standard Create Blueprint interface to a dedicated Profile Takeover interface. Preview uses `--dry-run`; creation uses the default preserve-installed behavior unless Convert is selected. The takeover path never invokes source-profile unscoping.
 
-A Blueprint may be successfully created while still requiring administrator review because one or more source settings cannot be represented directly.
+The middle editor can switch between GUI and JSON. The GUI presents workflow, import mode, source-scope behavior, verdict, reasons, and strict import controls. JSON shows the generated standard Blueprint or the takeover command/result plan. The footer creator label is removed and API expiration remains at the far right.
 
-> ⚠️ **This distinction is especially important before removing the original Configuration Profile from scope.**
+## 3.5.0 GUI parity and usability
 
----
+The takeover GUI now represents every non-global `import-profile` option exposed in the JSON/command plan. Each control displays its corresponding CLI flag and a plain-language explanation. Unsupported controls are disabled based on runtime capability detection. The GUI also shows source profile identity and scope, source profile disposition, the exact non-secret jamf-cli command, verdict, warnings, and dropped-key diagnostics.
 
-# ⚡ Activation Conditions
+## 3.5.0 Final GUI and Takeover Workflow
 
-Activation Conditions determine when applicable Blueprint configuration should activate.
+Version 3.5.0 uses the current public jamf-cli release, detected dynamically at runtime. If `pro blueprints import-profile` is available, selecting Profile Takeover changes the right pane to Blueprint Takeover and automatically evaluates the selected profile with a debounced `--dry-run`.
 
-Review generated or proposed Activation Conditions before creating the Blueprint.
+The GUI and JSON views share the same Blueprint data. End users can edit the Blueprint name, description, first step name, activation condition, and component inclusion through guided controls. Each takeover switch is selectable in the GUI, displays its CLI mapping, and includes tooltip help. Knowledge Base walkthroughs cover automatic takeover evaluation and GUI/JSON editing.
 
-BCU keeps this information visible during the conversion workflow so that the administrator can verify that the resulting behavior matches the intended device configuration.
+### Final signed and notarized release
 
----
+```bash
+./build.sh \
+  --sign-app "9244D7B494B37C12617975132DFA97F1F8241BE4" \
+  --sign-installer "Developer ID Installer: Jarred Wheeler (PU669FP3N7)" \
+  --notary-profile "blueprint-notary" \
+  2>&1 | tee release-build.log
+```
 
-# 🧪 Dry Run
+The build succeeds only after the app, package, and disk image complete their configured signature and notarization checks.
 
-BCU provides a **Dry Run** mode so the proposed operation can be evaluated before Jamf is changed.
+## 3.5.0 Usability refinement
 
-> ✅ **Running a Dry Run is strongly recommended.**
+The GUI is divided into Setup, Blueprint, and Properties sections. Setup presents only the guided workflow and keeps advanced import switches collapsed. Blueprint provides text fields for the commonly edited Blueprint values. Properties provides searchable, path-aware editing for scalar JSON values: booleans use Enabled/Disabled dropdowns, strings and numbers use text fields, and null values are shown as Not configured. Changes are serialized back to the same JSON document.
 
-During a Dry Run, BCU can evaluate the requested workflow and highlight relevant configuration, scope, conversion, or lifecycle concerns without performing the final production operation.
+## 3.5.0 Dry Run and Recommendation refinement
 
-A typical workflow is:
+A Dry Run switch is displayed in the Blueprint Editor header. While enabled, profile takeover evaluation is automatic and always non-modifying. Creation actions remain disabled until Dry Run is turned off. BCU now uses the source profile scope and jamf-cli verdict to recommend the safest next action. Profiles without a group scope are directed to choose a target group before evaluation. Technical evaluation details are collapsed by default.
 
-1. Select the source Configuration Profile.
-2. Allow analysis to finish.
-3. Review the recommendation.
-4. Select the intended target.
-5. Review the proposed Blueprint.
-6. Enable **Dry Run**.
-7. Execute the workflow.
-8. Review the results.
-9. Correct any problems or warnings.
-10. Disable Dry Run.
-11. Execute the production operation.
+## Version 3.5.0 Apple Schema Browser
 
----
-
-# ▶️ Execution Actions
-
-Once analysis and review have been completed, BCU provides execution actions appropriate to the current workflow.
-
-## 📝 Create Only
-
-**Create Only** creates the Blueprint without requesting deployment.
-
-The source Configuration Profile remains scoped.
-
-Use this when you want to:
-
-- Inspect the created Blueprint before deployment
-- Perform additional Jamf-side review
-- Separate Blueprint creation from deployment
-- Preserve the source Configuration Profile while validating the result
-
----
-
-## 🚀 Create and Deploy
-
-**Create and Deploy** creates the Blueprint and requests deployment.
-
-BCU retains the Blueprint identifier and validates deployment asynchronously through Jamf Platform API read-back rather than assuming that the immediate creation response represents the final deployment state.
-
-Deployment is therefore treated as a process, not a single synchronous event.
-
-An initial state indicating that the Blueprint has not yet deployed is not automatically considered a failure.
-
-BCU continues checking the Blueprint deployment state until one of the following occurs:
-
-- ✅ Deployment is confirmed
-- ❌ Jamf reports a terminal failure
-- ⏱️ Deployment validation times out
-- ❓ The resulting state cannot be conclusively determined
-
----
-
-# 🔄 Deployment Validation
-
-Jamf may require time after a deployment request before the final deployment state is visible through the Platform API.
-
-Because of this, BCU uses asynchronous read-back and polling.
-
-Conceptually, the workflow is:
-
-1. 🧩 Create the Blueprint.
-2. 🚀 Request deployment.
-3. 🆔 Retain the returned Blueprint ID.
-4. 🔍 Read the Blueprint state through the Platform API.
-5. 🔄 Continue polling while the state is nonterminal.
-6. ✅ Stop when deployment is confirmed, a terminal error is returned, or validation reaches its timeout.
-7. 📋 Report the resulting state accurately to the administrator.
-
-This avoids incorrectly reporting a successful deployment as failed simply because Jamf had not finished processing it when the initial response was received.
-
----
-
-# 🟡 Partial Completion
-
-Blueprint creation and Blueprint deployment are separate outcomes.
-
-For example, BCU may successfully create a Blueprint but be unable to conclusively validate the subsequent deployment within the expected validation period.
-
-BCU treats this situation as **partial completion** rather than incorrectly reporting the entire operation as failed.
-
-A partial-completion result indicates that some requested operations succeeded but administrator review is still required.
-
-Review:
-
-- Blueprint ID
-- Creation result
-- Deployment request result
-- Latest Platform API deployment state
-- Source Configuration Profile state
-- Activity details
-- Application logs
-
-before retrying an operation.
-
-> ⚠️ **Avoid immediately recreating a Blueprint simply because deployment validation was inconclusive.**
-
----
-
-# 🛡️ Source Configuration Profile Lifecycle
-
-Creating a Blueprint and removing the original Configuration Profile from scope are intentionally separate decisions.
-
-BCU does not assume that successful Blueprint creation means the source profile should immediately be removed.
-
-This helps prevent an incomplete migration from unintentionally removing configuration from managed devices.
-
----
-
-# 🚫 Unscoping the Source Profile
-
-When supported by the selected workflow, BCU can allow the administrator to remove the source Configuration Profile from scope.
-
-This is an explicit lifecycle operation.
-
-BCU requires confirmation before performing an unscope action.
-
-The confirmation should make clear:
-
-- Which Configuration Profile is being modified
-- That its current scope will be removed
-- That managed devices may stop receiving the Configuration Profile
-- That the action is separate from Blueprint creation
-- That Blueprint deployment should be verified before proceeding
-
-> ⚠️ **Do not unscope the source profile merely because Blueprint creation succeeded.**
-
-Confirm the resulting Blueprint configuration and deployment first.
-
----
-
-# 🔁 Takeover Workflows
-
-Some migrations may be handled as takeover operations rather than simple Blueprint creation.
-
-A takeover workflow should be used only when the selected profile and Jamf environment support the operation and BCU's analysis recommends or permits it.
-
-Before proceeding, review:
-
-- Source Configuration Profile
-- Current scope
-- Proposed Blueprint
-- Target group
-- Conversion analysis
-- Dropped keys
-- Activation Conditions
-- Deployment implications
-- Source-profile lifecycle action
-
-Run a Dry Run before executing a takeover.
-
----
-
-# ✅ Completion Results
-
-After execution, BCU presents the outcome of the operation.
-
-The completion state may include information such as:
-
-- Source Configuration Profile
-- Source Configuration Profile ID
-- Blueprint ID
-- Blueprint creation result
-- Deployment requested
-- Current deployment state
-- Deployment validation result
-- Scope changes
-- Dropped or unsupported settings
-- Partial-completion warnings
-- Recommended next action
-
-> **Do not rely on a single success indicator.**
-
-Review creation, deployment, configuration differences, and source-profile state together when determining whether the migration is complete.
-
----
-
-# 📊 Activity
-
-BCU provides activity information to make the conversion process easier to understand and troubleshoot.
-
-Activity information can help identify:
-
-- Analysis progress
-- API operations
-- Blueprint creation
-- Deployment requests
-- Deployment validation
-- Polling state
-- Lifecycle operations
-- Errors and warnings
-
----
-
-# 📜 Application Logs
-
-For troubleshooting or validation, review the application logs.
-
-Logs are particularly useful when:
-
-- Analysis does not complete
-- `jamf-cli` analysis does not update
-- A Blueprint cannot be created
-- Deployment remains pending
-- Platform API validation fails
-- Scope cannot be modified
-- A group cannot be retrieved
-- A lifecycle operation is rejected
-
-When reporting an issue, preserve the relevant logs along with:
-
-- Operation being performed
-- Source Configuration Profile ID
-- Blueprint ID, if available
-- Approximate time of the operation
-- Reported deployment state
-- Any visible BCU error
-
-> 🔐 **Security:** Do not include credentials, secrets, or authentication tokens in externally shared troubleshooting information.
-
----
-
-# 🛣️ Recommended Migration Workflow
-
-For production migrations, the safest general workflow is:
-
-## 1. 🔌 Connect
-
-Configure and test the Jamf connection.
-
-## 2. 📄 Select
-
-Choose **Computers** or **Mobile Devices**, then select the source Configuration Profile.
-
-## 3. 🔍 Analyze
-
-Wait for BCU and `jamf-cli` analysis to complete.
-
-## 4. 💡 Review the Recommendation
-
-Understand the recommended migration approach and any warnings.
-
-## 5. 🎯 Review Scope
-
-Confirm which devices or groups currently receive the source Configuration Profile.
-
-## 6. 👥 Select the Blueprint Target
-
-Select the intended compatible target group when required.
-
-## 7. 🧩 Review the Blueprint
-
-Verify:
-
-- Name
-- Description
-- Editable values
-- Payloads
-- Components
-- Activation Conditions
-- Dropped or unsupported settings
-
-## 8. 🧪 Run a Dry Run
-
-Execute the workflow with Dry Run enabled.
-
-Resolve unexpected results before continuing.
-
-## 9. ▶️ Execute
-
-Disable Dry Run and select the required production action.
-
-For example:
-
-- **Create Only**
-- **Create and Deploy**
-- **Takeover**, when supported
-
-## 10. 🔄 Validate Deployment
-
-If deployment was requested, allow BCU's asynchronous validation to complete.
-
-Do not interpret a temporary non-deployed state as an immediate failure.
-
-## 11. ✅ Review the Result
-
-Confirm:
-
-- Blueprint creation
-- Blueprint ID
-- Deployment result
-- Dropped configuration
-- Target
-- Source Configuration Profile state
-
-## 12. 🛡️ Unscope Only When Appropriate
-
-If the migration has been validated and the source Configuration Profile is no longer required, explicitly authorize the unscope operation.
-
----
-
-# 🛡️ Important Safety Principles
-
-BCU is intentionally conservative around operations that can change device configuration.
-
-The following principles should be followed during production use.
-
-## 🔍 Analyze First
-
-Allow profile analysis to complete before selecting an execution path.
-
-## 🧪 Dry Run First
-
-Use Dry Run before performing production changes whenever possible.
-
-## 🧩 Treat Creation and Deployment Separately
-
-A successfully created Blueprint is not necessarily a successfully deployed Blueprint.
-
-## 🎯 Treat Deployment and Unscoping Separately
-
-A deployment request does not automatically justify removing the source Configuration Profile.
-
-## ✅ Verify Before Removing Existing Management
-
-Confirm that the Blueprint contains the expected configuration and has reached the intended target before removing the original profile.
-
-## ⚠️ Review Dropped Keys
-
-Do not assume the Blueprint is functionally identical to the Configuration Profile if BCU reports unsupported or dropped settings.
-
-## ⏱️ Do Not Assume an Immediate Deployment State Is Final
-
-Jamf Platform processing can be asynchronous. Allow BCU's deployment validation workflow to reach its conclusion.
-
----
-
-# 🛠️ Troubleshooting
-
-## ⏳ Analysis Does Not Complete
-
-If analysis appears to remain in progress:
-
-1. Verify that the Jamf connection is still valid.
-2. Confirm that the selected Configuration Profile can be retrieved.
-3. Review `jamf-cli` status.
-4. Review Activity.
-5. Review the application logs.
-6. Reselect the profile and allow a fresh analysis to run if appropriate.
-
----
-
-## 🤖 `jamf-cli` Does Not Update
-
-If the `jamf-cli` portion of analysis does not refresh after changing profiles:
-
-1. Confirm the newly selected Configuration Profile is shown.
-2. Give the current analysis time to complete.
-3. Review Activity for discovery or execution errors.
-4. Review application logs.
-5. Verify that the analysis result belongs to the currently selected profile before continuing.
-
-> ⚠️ Do not rely on an analysis result left over from another Configuration Profile.
-
----
-
-## 🟡 Blueprint Was Created but Deployment Is Not Yet Confirmed
-
-Do not immediately create another Blueprint.
-
-Instead:
-
-1. Note the Blueprint ID.
-2. Allow BCU's deployment polling to continue.
-3. Review the most recent Platform API state.
-4. Review Activity.
-5. Review logs.
-6. If validation times out, inspect the Blueprint in Jamf before deciding whether another action is necessary.
-
-The operation may have partially completed successfully.
-
----
-
-## ⏱️ Deployment Shows a Temporary Non-Deployed State
-
-A non-deployed state returned immediately after requesting deployment may be transitional.
-
-BCU therefore polls the Jamf Platform API instead of treating that initial state as a terminal failure.
-
-Allow validation to complete before retrying the operation.
-
----
-
-## 👥 Target Group Is Missing
-
-If an expected group does not appear:
-
-1. Verify the selected device platform.
-2. Confirm the group exists in Jamf.
-3. Confirm that the configured credentials can retrieve it.
-4. Refresh the relevant data.
-5. Review Activity and logs for API or pagination errors.
-
----
-
-## 🚫 Unscope Is Not Available
-
-BCU intentionally restricts lifecycle operations when the current state does not justify them.
-
-Verify that:
-
-- The correct Configuration Profile is selected
-- Analysis has completed
-- The appropriate operation has completed
-- The current Blueprint state is known
-- The requested lifecycle operation is allowed for the current workflow
-
-Do not bypass lifecycle safeguards simply to force the source profile out of scope.
-
----
-
-# 🚦 Interpreting Results
-
-BCU deliberately distinguishes between several outcomes.
-
-### ✅ Successful
-
-The requested operation completed and BCU was able to validate the resulting state.
-
-### 🟡 Partial Completion
-
-One portion of the requested operation completed, but another portion could not yet be conclusively validated.
-
-For example:
-
-- Blueprint creation succeeded
-- Deployment was requested
-- Final deployment state could not be confirmed before validation ended
-
-### ❌ Failed
-
-The requested operation encountered a terminal error and could not complete as intended.
-
-### ⚠️ Requires Review
-
-BCU found configuration differences, unsupported settings, ambiguous state, or another condition that should be reviewed by an administrator before continuing.
-
----
-
-# ⭐ Operational Best Practices
-
-For production use:
-
-- 🧪 Test BCU against noncritical profiles first.
-- 🔐 Use least-privilege Jamf API credentials.
-- 🧪 Run a Dry Run before production migration.
-- 🔍 Review the source profile's payloads and scope.
-- ⚠️ Review dropped or unsupported settings.
-- 🎯 Verify Blueprint targets.
-- ⏱️ Wait for asynchronous deployment validation.
-- 🆔 Record the Blueprint ID for production changes.
-- ✅ Confirm deployment before unscoping the source profile.
-- 📜 Keep application logs available while validating major migrations.
-- 🚫 Avoid retrying creation blindly after partial completion.
-
----
-
-# ⬆️ Updating BCU
-
-BCU may evolve as Jamf Platform Blueprint capabilities and APIs change.
-
-When updating BCU:
-
-1. Review the release information accompanying the build.
-2. Confirm that your Jamf API credentials still provide the necessary permissions.
-3. Test important workflows before performing a production migration.
-4. Re-run analysis for profiles that were evaluated using an older build if conversion behavior has changed.
-
-This README intentionally avoids tying the workflow to a specific BCU release number so that the primary documentation remains useful across application updates.
-
-Release-specific behavior, fixes, and upgrade information should be documented separately in release notes or a changelog.
-
----
-
-# 🩺 Support and Diagnostics
-
-When troubleshooting a BCU issue, collect as much of the following information as possible:
-
-- BCU build/version
-- macOS version
-- Jamf environment type
-- Computer or Mobile Device workflow
-- Source Configuration Profile ID
-- Blueprint ID, when available
-- Operation selected
-- Whether Dry Run was enabled
-- Analysis status
-- `jamf-cli` analysis status
-- Deployment status
-- Relevant Activity entries
-- Relevant application logs
-
-> 🔐 **Before sharing diagnostic information:** Remove credentials, secrets, tokens, and other sensitive information.
-
----
-
-# ⚖️ Disclaimer
-
-Blueprint Conversion Utility performs administrative operations that can affect configuration delivery to managed devices.
-
-Administrators are responsible for reviewing generated Blueprints, deployment targets, unsupported configuration, scope changes, and lifecycle operations before applying them in a production environment.
-
-> ⚠️ **The creator/owner is not responsible for disruptions to your environment resulting from the use of Blueprint Conversion Utility.**
-
-Use **Dry Run** and nonproduction testing whenever practical, and verify Blueprint deployment before removing an existing Configuration Profile from scope.
-
----
-
-# 🙌 Special Thanks
-
-A special shoutout and sincere thanks to **Neil Martin**:
-
-👉 **[github.com/neilmartin83](https://github.com/neilmartin83)**
-
-for his help and assistance with **`jamf-cli`**.
-
-His knowledge, feedback, and assistance with `jamf-cli` helped make its integration into Blueprint Conversion Utility possible and contributed to BCU's ability to provide administrators with better analysis and guidance when evaluating Configuration Profiles for migration to Jamf Platform Blueprints.
-
-**Thank you, Neil!** 🎉
-
----
+The Help menu and application header now expose an Apple Schema Browser backed by a compiled copy of Apple's complete Device Management schema. The browser supports search across friendly names, identifiers, raw keys, descriptions, and nested paths; family and lifecycle filtering; Workgroup Manager-style disclosure arrows; platform support; lifecycle badges; wildcard keys; recursive references; and copy actions. The project includes the schema compiler under `Tools/SchemaCompiler` and the compiled runtime catalog under `Resources/AppleSchema`.

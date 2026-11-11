@@ -1,0 +1,46 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Xcode
+DerivedData/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcuserstate
+
+# BCU build outputs
+.build-artifacts/
+dist/
+release-build.log
+*.dmg
+*.pkg
+
+# Local credentials and environment
+.env
+.env.*
+!.env.example
+*.p12
+*.cer
+*.provisionprofile
+
+# Editors
+.vscode/
+.idea/
+*~
+*.swp
+
+# Python tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local temporary files
+*.tmp
+*.temp

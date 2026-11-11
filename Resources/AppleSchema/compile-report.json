@@ -1,0 +1,78 @@
+{
+  "diagnostics": [
+    {
+      "code": "recursive-alias",
+      "file": "declarative/declarations/configurations/safari.bookmarks.yaml",
+      "message": "Recursive YAML alias encountered beneath ManagedBookmarks.BookmarkGroup.Bookmarks.bookmarks-item.Folder.folder-item; emitted as a schema reference.",
+      "severity": "warning"
+    },
+    {
+      "code": "duplicate-identifier",
+      "file": "mdm/profiles/com.apple.MCX(EnergySaver).yaml",
+      "message": "mdm-profile:com.apple.MCX was already defined by mdm/profiles/com.apple.MCX(Accounts).yaml.",
+      "severity": "warning"
+    },
+    {
+      "code": "duplicate-identifier",
+      "file": "mdm/profiles/com.apple.MCX(FileVault2).yaml",
+      "message": "mdm-profile:com.apple.MCX was already defined by mdm/profiles/com.apple.MCX(Accounts).yaml.",
+      "severity": "warning"
+    },
+    {
+      "code": "duplicate-identifier",
+      "file": "mdm/profiles/com.apple.MCX(Mobility).yaml",
+      "message": "mdm-profile:com.apple.MCX was already defined by mdm/profiles/com.apple.MCX(Accounts).yaml.",
+      "severity": "warning"
+    },
+    {
+      "code": "duplicate-identifier",
+      "file": "mdm/profiles/com.apple.MCX(TimeServer).yaml",
+      "message": "mdm-profile:com.apple.MCX was already defined by mdm/profiles/com.apple.MCX(Accounts).yaml.",
+      "severity": "warning"
+    },
+    {
+      "code": "duplicate-identifier",
+      "file": "mdm/profiles/com.apple.MCX(WiFi).yaml",
+      "message": "mdm-profile:com.apple.MCX was already defined by mdm/profiles/com.apple.MCX(Accounts).yaml.",
+      "severity": "warning"
+    },
+    {
+      "code": "recursive-alias",
+      "file": "mdm/profiles/com.apple.applicationaccess.new.yaml",
+      "message": "Recursive YAML alias encountered beneath allowList.allowListItem.subApps; emitted as a schema reference.",
+      "severity": "warning"
+    },
+    {
+      "code": "recursive-alias",
+      "file": "mdm/profiles/com.apple.applicationaccess.new.yaml",
+      "message": "Recursive YAML alias encountered beneath whiteList.allowListItem.subApps; emitted as a schema reference.",
+      "severity": "warning"
+    },
+    {
+      "code": "duplicate-identifier",
+      "file": "mdm/profiles/com.apple.extensiblesso.yaml",
+      "message": "mdm-profile:com.apple.extensiblesso was already defined by mdm/profiles/com.apple.extensiblesso(kerberos).yaml.",
+      "severity": "warning"
+    },
+    {
+      "code": "recursive-alias",
+      "file": "mdm/profiles/com.apple.homescreenlayout.yaml",
+      "message": "Recursive YAML alias encountered beneath Dock.IconItem.Pages.PagesItem; emitted as a schema reference.",
+      "severity": "warning"
+    },
+    {
+      "code": "recursive-alias",
+      "file": "mdm/profiles/com.apple.homescreenlayout.yaml",
+      "message": "Recursive YAML alias encountered beneath Pages.PagesItem.IconItem.Pages; emitted as a schema reference.",
+      "severity": "warning"
+    }
+  ],
+  "generatedAt": "2026-10-16T13:35:06+00:00",
+  "summary": {
+    "errors": 0,
+    "keys": 4230,
+    "objects": 342,
+    "warnings": 11,
+    "wildcards": 54
+  }
+}

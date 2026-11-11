@@ -43,7 +43,6 @@ actor PlatformProfileClient {
     private let clientID: String
     private let clientSecret: String
     private let environmentID: String
-    private let tenantID: String
     private var accessToken = ""
     private var tokenExpiry = Date.distantPast
 
@@ -51,24 +50,16 @@ actor PlatformProfileClient {
         url: String,
         clientID: String,
         clientSecret: String,
-        environmentID: String,
-        tenantID: String
+        environmentID: String
     ) throws {
-        guard let value = URL(string: url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))),
-              value.scheme == "https" else {
-            throw AppFailure.message("Platform API URL must be a valid HTTPS URL.")
-        }
-        guard !environmentID.isEmpty || !tenantID.isEmpty else {
-            throw AppFailure.message("Platform API requires an Environment ID or Tenant ID.")
-        }
-        guard environmentID.isEmpty || tenantID.isEmpty else {
-            throw AppFailure.message("Specify either Environment ID or Tenant ID, not both.")
+        let value = try Validators.platformBaseURL(url)
+        guard !environmentID.isEmpty else {
+            throw AppFailure.message("Platform API requires a Platform Environment ID.")
         }
         baseURL = value
         self.clientID = clientID
         self.clientSecret = clientSecret
         self.environmentID = environmentID
-        self.tenantID = tenantID
     }
 
     func test() async throws {
@@ -88,11 +79,17 @@ actor PlatformProfileClient {
         let type = mobile
             ? "mobiledeviceconfigurationprofiles"
             : "osxconfigurationprofiles"
-        let data = try await get("proclassic/\(type)/id/\(profile.id)")
+        let profileID = try Validators.requireSafeIdentifier(profile.id, label: "Profile ID")
+        let data = try await get("proclassic/\(type)/id/\(profileID)")
         return try ProfileDetailParser().parse(data, base: profile)
     }
 
-    func unscopeProfile(id: String, mobile: Bool) async throws {
+    /// Removes every target from the source profile's scope. The original
+    /// `<scope>` element is saved first so the removal can be reversed.
+    /// Returns the backup file location.
+    @discardableResult
+    func unscopeProfile(id rawID: String, mobile: Bool) async throws -> URL {
+        let id = try Validators.requireSafeIdentifier(rawID, label: "Profile ID")
         let resource = mobile
             ? "mobiledeviceconfigurationprofiles"
             : "osxconfigurationprofiles"
@@ -123,34 +120,52 @@ actor PlatformProfileClient {
             )
         }
 
+        // Back up only the scope element; the full profile may hold secrets.
+        let name = firstCapture(in: originalXML, pattern: #"(?s)<general>.*?<name>([^<]*)</name>"#) ?? "Unknown"
+        let backup = try Self.writeScopeBackup(
+            scopeXML: existingScope, rootName: rootName, id: id, name: name, mobile: mobile
+        )
+        AppLogger.deployment.notice(
+            "Saved scope backup for source profile ID=\(id, privacy: .public)"
+        )
+
         let partialXML = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
             "<\(rootName)>\(modifiedScope)</\(rootName)>"
         let partial = try await putXML(path: path, xml: partialXML)
-        if partial.success {
-            try await verifyUnscoped(path: path, mobile: mobile, id: id)
-            AppLogger.deployment.notice(
-                "Source profile ID=\(id, privacy: .public) unscoped and verified with scope-only XML"
+        guard partial.success else {
+            throw AppFailure.message(
+                "Jamf Pro could not unscope profile \(id): HTTP \(partial.status): \(partial.body)\n\n" +
+                "The source profile remains scoped. The blueprint is unchanged."
             )
-            return
         }
-
-        var fullXML = originalXML
-        fullXML.replaceSubrange(scopeRange, with: modifiedScope)
-        let full = try await putXML(path: path, xml: fullXML)
-        if full.success {
-            try await verifyUnscoped(path: path, mobile: mobile, id: id)
-            AppLogger.deployment.notice(
-                "Source profile ID=\(id, privacy: .public) unscoped and verified with full-profile XML"
-            )
-            return
-        }
-
-        throw AppFailure.message(
-            "Jamf Pro could not unscope profile \(id).\n\n" +
-            "Scope-only update: HTTP \(partial.status): \(partial.body)\n\n" +
-            "Full-profile update: HTTP \(full.status): \(full.body)\n\n" +
-            "The deployed blueprint is unchanged and the source profile remains scoped."
+        try await verifyUnscoped(path: path, mobile: mobile, id: id)
+        AppLogger.deployment.notice(
+            "Source profile ID=\(id, privacy: .public) unscoped and verified with scope-only XML"
         )
+        return backup
+    }
+
+    private static func writeScopeBackup(
+        scopeXML: String, rootName: String, id: String, name: String, mobile: Bool
+    ) throws -> URL {
+        let fm = FileManager.default
+        let directory = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Blueprint Conversion Utility/Scope Backups", isDirectory: true)
+        try fm.createDirectory(
+            at: directory, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        let stamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        let file = directory.appendingPathComponent("profile-\(id)-\(stamp).xml")
+        let safeName = name.replacingOccurrences(of: "--", with: "- -")
+        let document = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+            "<!-- Scope backup. Profile: \(safeName) (ID \(id), \(mobile ? "mobile" : "computer")). " +
+            "Restore with a Classic API PUT of this document to \(rootName). -->\n" +
+            "<\(rootName)>\(scopeXML)</\(rootName)>\n"
+        try document.write(to: file, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        return file
     }
 
     private func verifyUnscoped(path: String, mobile: Bool, id: String) async throws {
@@ -274,11 +289,7 @@ actor PlatformProfileClient {
     }
 
     private func applyScopeHeader(to request: inout URLRequest) {
-        if !environmentID.isEmpty {
-            request.setValue(environmentID, forHTTPHeaderField: "X-Environment-Id")
-        } else {
-            request.setValue(tenantID, forHTTPHeaderField: "X-Tenant-Id")
-        }
+        request.setValue(environmentID, forHTTPHeaderField: "X-Environment-Id")
     }
 
     private func get(_ path: String) async throws -> Data {
@@ -298,94 +309,153 @@ actor PlatformClient {
     private let clientID: String
     private let clientSecret: String
     private let environmentID: String
-    private let tenantID: String
     private var accessToken = ""
     private var tokenExpiry = Date.distantPast
 
-    init(url: String, clientID: String, clientSecret: String, environmentID: String, tenantID: String) throws {
-        guard let value = URL(string: url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))),
-              value.scheme == "https" else {
-            throw AppFailure.message("Platform API URL must be a valid HTTPS URL.")
-        }
-        guard !environmentID.isEmpty || !tenantID.isEmpty else {
-            throw AppFailure.message("Platform API requires an Environment ID or Tenant ID.")
-        }
-        guard environmentID.isEmpty || tenantID.isEmpty else {
-            throw AppFailure.message("Specify either Environment ID or Tenant ID, not both.")
+    init(url: String, clientID: String, clientSecret: String, environmentID: String) throws {
+        let value = try Validators.platformBaseURL(url)
+        guard !environmentID.isEmpty else {
+            throw AppFailure.message("Platform API requires a Platform Environment ID.")
         }
         baseURL = value
         self.clientID = clientID
         self.clientSecret = clientSecret
         self.environmentID = environmentID
-        self.tenantID = tenantID
     }
 
     func test() async throws {
         _ = try await authenticate()
     }
 
-    func groups() async throws -> [DeviceGroup] {
+    struct DeviceGroupPage: Sendable {
+        let groups: [DeviceGroup]
+        let page: Int
+        let pageSize: Int
+        let totalCount: Int?
+        let hasMore: Bool
+    }
+
+    func groups(page: Int = 0, pageSize: Int = 100) async throws -> DeviceGroupPage {
         let data = try await request(
             path: "device-groups/v1/device-groups",
             method: "GET",
             body: nil,
-            preferTenant: true
+            queryItems: [
+                URLQueryItem(name: "page", value: String(page)),
+                URLQueryItem(name: "page-size", value: String(pageSize))
+            ]
         )
         let object = try JSONSerialization.jsonObject(with: data)
+        let dictionary = object as? [String: Any]
         let records: [[String: Any]]
-        if let dictionary = object as? [String: Any] {
+        if let dictionary {
             records = dictionary["results"] as? [[String: Any]]
                 ?? dictionary["items"] as? [[String: Any]]
+                ?? dictionary["data"] as? [[String: Any]]
                 ?? []
         } else {
             records = object as? [[String: Any]] ?? []
         }
-        return records.compactMap { row in
-            guard let rawID = row["id"] else { return nil }
-            let id = String(describing: rawID)
-            let name = row["name"] as? String ?? id
-            let keys = [
-                "deviceType", "deviceFamily", "platform", "type", "osType",
-                "groupType", "memberType", "deviceGroupType", "objectType",
-                "deviceCollectionType", "targetType"
-            ]
-            let metadata = keys.compactMap {
-                row[$0].map { String(describing: $0).lowercased() }
-            }.joined(separator: " ")
-            let family: DeviceGroupFamily
-            if metadata.contains("mobile") || metadata.contains("ios") ||
-                metadata.contains("ipados") || metadata.contains("ipad") ||
-                metadata.contains("iphone") || metadata.contains("tvos") {
-                family = .mobile
-            } else if metadata.contains("computer") ||
-                        metadata.contains("macos") ||
-                        metadata.contains("mac") {
-                family = .computer
-            } else {
-                family = .unknown
-            }
-            return DeviceGroup(id: id, name: name, family: family)
+
+        let groups = records.compactMap(Self.deviceGroup(from:))
+        let totalCount = Self.integerValue(
+            dictionary?["totalCount"] ?? dictionary?["total"] ??
+            (dictionary?["pagination"] as? [String: Any])?["totalCount"] ??
+            (dictionary?["page"] as? [String: Any])?["totalElements"]
+        )
+        let loadedThrough = (page * pageSize) + records.count
+        let hasMore = totalCount.map { loadedThrough < $0 } ?? (records.count == pageSize)
+        return DeviceGroupPage(
+            groups: groups,
+            page: page,
+            pageSize: pageSize,
+            totalCount: totalCount,
+            hasMore: hasMore
+        )
+    }
+
+    private static func deviceGroup(from row: [String: Any]) -> DeviceGroup? {
+        guard let rawID = row["id"] else { return nil }
+        let id = String(describing: rawID)
+        let name = row["name"] as? String ?? id
+        let keys = [
+            "deviceType", "deviceFamily", "platform", "type", "osType",
+            "groupType", "memberType", "deviceGroupType", "objectType",
+            "deviceCollectionType", "targetType"
+        ]
+        let metadata = keys.compactMap {
+            row[$0].map { String(describing: $0).lowercased() }
+        }.joined(separator: " ")
+        let family: DeviceGroupFamily
+        if metadata.contains("mobile") || metadata.contains("ios") ||
+            metadata.contains("ipados") || metadata.contains("ipad") ||
+            metadata.contains("iphone") || metadata.contains("tvos") {
+            family = .mobile
+        } else if metadata.contains("computer") ||
+                    metadata.contains("macos") || metadata.contains("mac") {
+            family = .computer
+        } else {
+            family = .unknown
         }
+        return DeviceGroup(id: id, name: name, family: family)
+    }
+
+    private static func integerValue(_ value: Any?) -> Int? {
+        if let value = value as? Int { return value }
+        if let value = value as? NSNumber { return value.intValue }
+        if let value = value as? String { return Int(value) }
+        return nil
     }
 
     func createBlueprint(_ data: Data) async throws -> String {
         let response = try await request(
             path: "blueprints/v1/blueprints",
             method: "POST",
-            body: data,
-            preferTenant: false
+            body: data
         )
         let object = try JSONSerialization.jsonObject(with: response) as? [String: Any]
-        return String(describing: object?["id"] ?? object?["blueprintId"] ?? "Created")
+        guard let rawID = object?["id"] ?? object?["blueprintId"],
+              Validators.isSafeIdentifier(String(describing: rawID)) else {
+            throw AppFailure.message(
+                "The Platform created a blueprint but did not return a usable ID. " +
+                "Check Jamf for the new blueprint before retrying."
+            )
+        }
+        return String(describing: rawID)
     }
 
     func deployBlueprint(id: String) async throws {
+        let safeID = try Validators.requireSafeIdentifier(id, label: "Blueprint ID")
         _ = try await request(
-            path: "blueprints/v1/blueprints/\(id)/deploy",
+            path: "blueprints/v1/blueprints/\(safeID)/deploy",
             method: "POST",
-            body: Data(),
-            preferTenant: false
+            body: Data()
         )
+    }
+
+    func blueprintDeploymentState(id: String) async throws -> String? {
+        _ = try Validators.requireSafeIdentifier(id, label: "Blueprint ID")
+        let response = try await request(
+            path: "blueprints/v1/blueprints/\(id)",
+            method: "GET",
+            body: nil
+        )
+        let object = try JSONSerialization.jsonObject(with: response)
+        return deploymentState(in: object)
+    }
+
+    private func deploymentState(in value: Any) -> String? {
+        if let object = value as? [String: Any] {
+            if let deployment = object["deploymentState"] as? [String: Any],
+               let state = deployment["state"] as? String { return state }
+            if let state = object["deploymentState"] as? String { return state }
+            if let state = object["state"] as? String,
+               ["DEPLOYED", "NOT_DEPLOYED", "DEPLOYMENT_PENDING", "DEPLOYMENT_FAILED", "FAILED", "ERROR"].contains(state.uppercased()) { return state }
+            for child in object.values { if let state = deploymentState(in: child) { return state } }
+        } else if let array = value as? [Any] {
+            for child in array { if let state = deploymentState(in: child) { return state } }
+        }
+        return nil
     }
 
     private func authenticate() async throws -> String {
@@ -408,20 +478,25 @@ actor PlatformClient {
         return accessToken
     }
 
-    private func request(path: String, method: String, body: Data?, preferTenant: Bool) async throws -> Data {
+    private func request(
+        path: String,
+        method: String,
+        body: Data?,
+        queryItems: [URLQueryItem] = []
+    ) async throws -> Data {
         let token = try await authenticate()
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        let endpoint = baseURL.appendingPathComponent(path)
+        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+        components?.queryItems = queryItems.isEmpty ? nil : queryItems
+        guard let url = components?.url else {
+            throw AppFailure.message("Unable to construct Platform API request URL.")
+        }
+        var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        if preferTenant && !tenantID.isEmpty {
-            request.setValue(tenantID, forHTTPHeaderField: "X-Tenant-Id")
-        } else if !environmentID.isEmpty {
-            request.setValue(environmentID, forHTTPHeaderField: "X-Environment-Id")
-        } else {
-            request.setValue(tenantID, forHTTPHeaderField: "X-Tenant-Id")
-        }
+        request.setValue(environmentID, forHTTPHeaderField: "X-Environment-Id")
 
         if let body {
             request.httpBody = body

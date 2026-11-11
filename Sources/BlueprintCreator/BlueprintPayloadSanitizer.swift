@@ -90,6 +90,72 @@ enum BlueprintPayloadSanitizer {
         }
     }
 
+    /// Checks the exact JSON that is about to be POSTed against the user's
+    /// current selection. The text is editable, so nothing in it is trusted.
+    static func validateSubmission(
+        _ data: Data, expectedProfileID: String, expectedGroupID: String
+    ) throws {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AppFailure.message("The blueprint JSON is not a valid JSON object.")
+        }
+        guard let name = object["name"] as? String,
+              !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AppFailure.message("Blueprint name must not be blank.")
+        }
+        guard name.contains("Configuration Profile #\(expectedProfileID)") else {
+            throw AppFailure.message(
+                "The blueprint name no longer references the selected Configuration Profile (ID \(expectedProfileID)). Use Regenerate."
+            )
+        }
+        guard let scope = object["scope"] as? [String: Any],
+              let groups = scope["deviceGroups"] as? [String],
+              groups == [expectedGroupID] else {
+            throw AppFailure.message(
+                "The blueprint's device group does not match the selected Platform group. Use Regenerate."
+            )
+        }
+        guard let steps = object["steps"] as? [[String: Any]], !steps.isEmpty else {
+            throw AppFailure.message("The blueprint has no steps.")
+        }
+        for step in steps {
+            guard let components = step["components"] as? [[String: Any]], !components.isEmpty else {
+                throw AppFailure.message("A blueprint step has no components.")
+            }
+            for component in components {
+                guard let identifier = component["identifier"] as? String,
+                      !identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      component["configuration"] is [String: Any] else {
+                    throw AppFailure.message("A blueprint component is missing its identifier or configuration.")
+                }
+            }
+        }
+    }
+
+    /// Dotted key paths of credential-like fields whose value is a redaction
+    /// placeholder; submitting these would deploy a broken credential.
+    static func redactedCredentialFields(in payloads: [[String: Any]]) -> [String] {
+        var found: [String] = []
+        func walk(_ value: Any, path: String, credentialKey: Bool, depth: Int) {
+            guard depth <= maximumDepth else { return }
+            if let text = value as? String {
+                if credentialKey, redactedValues.contains(text.lowercased()) { found.append(path) }
+            } else if let dictionary = value as? [String: Any] {
+                for (key, nested) in dictionary {
+                    walk(nested, path: "\(path).\(key)", credentialKey: isCredentialKey(key), depth: depth + 1)
+                }
+            } else if let array = value as? [Any] {
+                for (index, nested) in array.enumerated() {
+                    walk(nested, path: "\(path)[\(index)]", credentialKey: credentialKey, depth: depth + 1)
+                }
+            }
+        }
+        for (index, payload) in payloads.enumerated() {
+            let type = (payload["PayloadType"] as? String) ?? "payload \(index + 1)"
+            walk(payload, path: type, credentialKey: false, depth: 0)
+        }
+        return found.sorted()
+    }
+
     private static func isCredentialKey(_ key: String) -> Bool {
         let lower = key.lowercased()
         return credentialFragments.contains { lower.contains($0) }
