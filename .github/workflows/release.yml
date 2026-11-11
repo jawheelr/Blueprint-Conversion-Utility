@@ -29,6 +29,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: Vendor/jamf-cli/go.mod
+          cache: false
+
       - name: Regression tests
         run: |
           for t in Tests/*.py; do python3 -I "$t"; done
