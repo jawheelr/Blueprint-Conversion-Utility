@@ -1,0 +1,95 @@
+name: jamf-cli update watch
+
+# GitHub cannot subscribe to another repository's releases, so this polls once a day.
+# When Jamf-Concepts/jamf-cli publishes a newer stable release it opens a PR that
+# bumps the bundled version in build.sh. CI builds and tests against it; merging the
+# PR runs the normal release workflow, which publishes the next patch version.
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jamf-cli-update
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # A token that can push and open PRs is needed so the PR triggers CI.
+      # PRs created with the built-in GITHUB_TOKEN do not start other workflows.
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.BCU_BOT_TOKEN }}
+
+      - name: Compare with the latest jamf-cli release
+        id: compare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(gh api repos/Jamf-Concepts/jamf-cli/releases/latest --jq .tag_name)"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Unexpected tag format '$tag'; ignoring."; echo "update=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          latest="${tag#v}"
+          current="$(sed -n 's/^JAMF_CLI_VERSION="${BCU_JAMF_CLI_VERSION:-\([0-9][0-9.]*\)}"$/\1/p' build.sh)"
+          [[ -n "$current" ]] || { echo "Could not read the current version from build.sh"; exit 1; }
+          echo "bundled=$current latest=$latest"
+          newest="$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -1)"
+          if [[ "$latest" == "$current" || "$newest" != "$latest" ]]; then
+            echo "Already up to date."; echo "update=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          branch="bot/jamf-cli-$latest"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "Branch $branch already exists; a PR is already open or was closed."; echo "update=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          gh api "repos/Jamf-Concepts/jamf-cli/releases/tags/$tag" --jq '.body // ""' | head -c 3000 > "$RUNNER_TEMP/notes.txt"
+          {
+            echo "update=true"
+            echo "current=$current"
+            echo "latest=$latest"
+            echo "branch=$branch"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open the update PR
+        if: steps.compare.outputs.update == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.BCU_BOT_TOKEN }}
+          CURRENT: ${{ steps.compare.outputs.current }}
+          LATEST: ${{ steps.compare.outputs.latest }}
+          BRANCH: ${{ steps.compare.outputs.branch }}
+        run: |
+          set -euo pipefail
+          sed -i.bak "s/^\(JAMF_CLI_VERSION=\"\${BCU_JAMF_CLI_VERSION:-\)$CURRENT}\"\$/\1$LATEST}\"/" build.sh
+          rm -f build.sh.bak
+          grep -q "BCU_JAMF_CLI_VERSION:-$LATEST}" build.sh || { echo "Version edit did not apply"; exit 1; }
+          git config user.name "bcu-update-bot"
+          git config user.email "bcu-update-bot@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git commit -am "Bundle jamf-cli $LATEST"
+          git push origin "$BRANCH"
+          {
+            echo "Bumps the bundled jamf-cli from $CURRENT to $LATEST."
+            echo
+            echo "- CI builds BCU against the new release (checksum verified by build.sh)."
+            echo "- Review the notes below, then run the Explain & Recommend and takeover previews before merging, since jamf-cli changes can alter takeover behavior."
+            echo "- Merging publishes the next patch release."
+            echo
+            echo "Release notes: https://github.com/Jamf-Concepts/jamf-cli/releases/tag/v$LATEST"
+            echo
+            echo "<details><summary>Upstream release notes (excerpt)</summary>"
+            echo
+            echo "~~~~"
+            cat "$RUNNER_TEMP/notes.txt"
+            echo
+            echo "~~~~"
+            echo "</details>"
+          } > "$RUNNER_TEMP/body.md"
+          gh pr create --base main --head "$BRANCH" \
+            --title "Bundle jamf-cli $LATEST" --body-file "$RUNNER_TEMP/body.md"
