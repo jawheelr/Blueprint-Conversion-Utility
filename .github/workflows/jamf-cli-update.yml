@@ -79,7 +79,7 @@ jobs:
             echo
             echo "- CI builds BCU against the new release (checksum verified by build.sh)."
             echo "- Review the notes below, then run the Explain & Recommend and takeover previews before merging, since jamf-cli changes can alter takeover behavior."
-            echo "- Merging publishes the next patch release. Add the \`release:minor\` label first if this should be a minor release."
+            echo "- Merging publishes the next patch release."
             echo
             echo "Release notes: https://github.com/Jamf-Concepts/jamf-cli/releases/tag/v$LATEST"
             echo
