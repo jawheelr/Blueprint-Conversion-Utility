@@ -6,8 +6,8 @@ struct UpdateAvailableView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top, spacing: 14) {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .center, spacing: 16) {
                 Image(systemName: "arrow.down.circle.fill")
                     .font(.system(size: 42))
                     .foregroundStyle(.blue)
@@ -25,15 +25,18 @@ struct UpdateAvailableView: View {
                     ScrollView {
                         Text(update.releaseNotes)
                             .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .padding(8)
+                            .padding(14)
                     }
-                    .frame(minHeight: 220)
+                    .frame(height: 220)
                 }
 
                 Text("The app downloads the versioned PKG, validates it, and opens the native macOS Installer. After Installer opens, this application closes. When the installed version changes, the application relaunches automatically. Installer confirmation and administrator authorization may still be required.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
 
                 if !model.updateDownloadStatus.isEmpty {
                     HStack(spacing: 8) {
@@ -44,6 +47,7 @@ struct UpdateAvailableView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    .padding(.horizontal, 4)
                 }
 
                 HStack {
@@ -62,7 +66,8 @@ struct UpdateAvailableView: View {
                 }
             }
         }
-        .padding(26)
-        .frame(width: 650, height: 440)
+        .padding(28)
+        .frame(width: 680)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
