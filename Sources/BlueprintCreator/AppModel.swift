@@ -1253,7 +1253,8 @@ final class AppModel: ObservableObject {
         blueprintDescription = object["description"] as? String ?? blueprintDescription
         if let step = (object["steps"] as? [[String: Any]])?.first {
             blueprintStepName = step["name"] as? String ?? blueprintStepName
-            blueprintActivationCondition = step["activationCondition"] as? String ?? ""
+            // activationPredicate is the Platform API field; activationCondition was written by older BCU builds.
+            blueprintActivationCondition = step["activationPredicate"] as? String ?? step["activationCondition"] as? String ?? ""
             blueprintComponents = (step["components"] as? [[String: Any]] ?? []).enumerated().map { index, value in
                 BlueprintComponentOption(index: index, identifier: value["identifier"] as? String ?? "Component \(index + 1)", included: true)
             }
@@ -1336,8 +1337,9 @@ final class AppModel: ObservableObject {
         object["description"] = blueprintDescription
         if var steps = object["steps"] as? [[String: Any]], !steps.isEmpty {
             steps[0]["name"] = blueprintStepName
-            if blueprintActivationCondition.isEmpty { steps[0].removeValue(forKey: "activationCondition") }
-            else { steps[0]["activationCondition"] = blueprintActivationCondition }
+            steps[0].removeValue(forKey: "activationCondition")
+            if blueprintActivationCondition.isEmpty { steps[0].removeValue(forKey: "activationPredicate") }
+            else { steps[0]["activationPredicate"] = blueprintActivationCondition }
             if let components = steps[0]["components"] as? [[String: Any]] {
                 let included = Set(blueprintComponents.filter { $0.included }.map { $0.index })
                 steps[0]["components"] = components.enumerated().filter { included.contains($0.offset) }.map { $0.element }
