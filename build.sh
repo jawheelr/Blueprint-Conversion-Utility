@@ -96,7 +96,7 @@ find_helper() {
   done
   return 1
 }
-JAMF_CLI_VERSION="${BCU_JAMF_CLI_VERSION:-1.36.0}"
+JAMF_CLI_VERSION="${BCU_JAMF_CLI_VERSION:-1.37.0}"
 JAMF_CLI_SOURCE="${BCU_JAMF_CLI_PATH:-}"
 if [[ -z "$JAMF_CLI_SOURCE" ]]; then
   # The vendored jamf-cli source is an older snapshot without the Takeover flags
