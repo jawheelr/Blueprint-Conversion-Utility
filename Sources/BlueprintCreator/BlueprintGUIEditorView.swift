@@ -280,7 +280,15 @@ struct BlueprintGUIEditorView: View {
     private var jsonValid: Bool { !model.jsonValidationMessage.localizedCaseInsensitiveContains("invalid") && !model.jsonValidationMessage.localizedCaseInsensitiveContains("error") }
     private var profileSummary: some View { HStack { Image(systemName: "doc.text.fill").font(.title2).foregroundStyle(.blue); VStack(alignment: .leading) { Text("Selected Configuration Profile").font(.headline); Text(model.selectedProfile?.name ?? "← Select a Configuration Profile").font(.title3.bold()); if let profile = model.selectedProfile { Text("ID: \(profile.id) • \(profile.scope.summary)").font(.caption).foregroundStyle(.secondary) } }; Spacer() } }
     private var activationBar: some View { HStack(spacing: 8) { Image(systemName: "info.circle.fill").foregroundStyle(.blue); Text("Blueprint Activation Conditions").font(.subheadline.bold()); Text(model.blueprintActivationCondition.isEmpty ? "No activation conditions configured." : conditionSummary).font(.caption).foregroundStyle(.secondary).lineLimit(1); Spacer(); Button("Edit Conditions") { showConditions = true }.controlSize(.small) }.padding(.horizontal, 12).padding(.vertical, 8).background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 10)) }
-    private var conditionSummary: String { model.blueprintActivationCondition.isEmpty ? "No activation conditions configured." : model.blueprintActivationCondition }
+    private var conditionSummary: String {
+        let text = model.blueprintActivationCondition
+        if text.isEmpty { return "No activation conditions configured." }
+        if let parsed = ActivationPredicate.parse(text) {
+            let count = parsed.rows.count
+            return "\(count) condition\(count == 1 ? "" : "s"), match \(parsed.match == .all ? "all" : "any")"
+        }
+        return "Custom predicate"
+    }
     private var outcomes: some View { VStack(alignment: .leading, spacing: 9) { Label("What will happen?", systemImage: "list.bullet.circle.fill").font(.title3.bold()); Text(model.selectedApproach == .takeover ? "BCU will attempt to adopt the existing installed profile into Blueprint management using the selected scope and settings." : "BCU will create a new Blueprint using the selected scope and settings.").foregroundStyle(.secondary) } }
     private func row(_ label: String, _ value: String) -> some View { HStack { Text(label).foregroundStyle(.secondary); Spacer(); Text(value).bold() } }
     private func card<Content: View>(tint: Color = .blue, @ViewBuilder content: () -> Content) -> some View { content().padding(18).background(RoundedRectangle(cornerRadius: 14).fill(Color(nsColor: .controlBackgroundColor)).overlay(RoundedRectangle(cornerRadius: 14).stroke(tint.opacity(0.2)))) }
@@ -291,78 +299,140 @@ private struct ActivationConditionsEditor: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var mode = 0
-    @State private var matchMode = "all"
-    @State private var attribute = "Device model"
-    @State private var comparison = "contains"
-    @State private var value = ""
+    @State private var match: ActivationMatch = .all
+    @State private var rows: [ActivationConditionRow] = []
     @State private var draft = ""
+    @State private var note: String?
 
-    private let attributes = ["Device model", "Operating system version", "Operating system build", "Architecture", "Device name", "Serial number", "FileVault enabled", "Bootstrap token escrowed", "Supervised"]
-    private let comparisons = ["is", "is not", "contains", "does not contain", "starts with", "does not start with", "ends with", "does not end with", "is like", "is not like", "matches", "does not match"]
+    private var predicate: String {
+        mode == 0 ? ActivationPredicate.build(rows: rows, match: match) : draft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    private var hasEmptyRows: Bool { rows.contains { $0.value.trimmingCharacters(in: .whitespaces).isEmpty } }
+    private var tooLong: Bool { predicate.count > ActivationPredicate.maxLength }
+
+    private var editorMode: Binding<Int> {
+        Binding(get: { mode }, set: { newValue in
+            if newValue == 1 {
+                draft = ActivationPredicate.build(rows: rows, match: match)
+                note = nil
+                mode = 1
+            } else if let parsed = ActivationPredicate.parse(draft) {
+                rows = parsed.rows.isEmpty ? [ActivationConditionRow()] : parsed.rows
+                match = parsed.match
+                note = nil
+                mode = 0
+            } else {
+                note = "This predicate uses syntax the Visual editor cannot show, so it stays in the Text editor and is saved exactly as written."
+            }
+        })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Blueprint Activation Conditions").font(.title.bold())
-                    Text("Control when this Blueprint should apply to a device.").foregroundStyle(.secondary)
+                    Text("Control when this Blueprint should apply to a device. Add as many conditions as you need.").foregroundStyle(.secondary)
                 }
                 Spacer()
-                Picker("Editor", selection: $mode) { Text("Visual").tag(0); Text("Text").tag(1) }
+                Picker("Editor", selection: editorMode) { Text("Visual").tag(0); Text("Text").tag(1) }
                     .pickerStyle(.segmented).frame(width: 180)
             }
 
+            if let note { Label(note, systemImage: "info.circle").font(.callout).foregroundStyle(.orange) }
+
             if mode == 0 {
-                Picker("Match", selection: $matchMode) { Text("Match all").tag("all"); Text("Match any").tag("any") }.frame(width: 160)
-                HStack(spacing: 10) {
-                    Picker("Attribute", selection: $attribute) { ForEach(attributes, id: \.self) { Text($0).tag($0) } }.frame(minWidth: 210)
-                    Picker("Operator", selection: $comparison) { ForEach(comparisons, id: \.self) { Text($0).tag($0) } }.frame(minWidth: 190)
-                    valueEditor
-                    Button("Set") { draft = expression }
+                HStack {
+                    Picker("Match", selection: $match) { Text("Match all").tag(ActivationMatch.all); Text("Match any").tag(ActivationMatch.any) }
+                        .frame(width: 180)
+                    Spacer()
+                    Button { rows.append(ActivationConditionRow()) } label: { Label("Add Condition", systemImage: "plus.circle") }
                 }
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if rows.isEmpty {
+                            Text("No conditions. The Blueprint applies to every device in its scope.").foregroundStyle(.secondary)
+                        }
+                        ForEach($rows) { $row in conditionRow($row) }
+                    }
+                }
+                .frame(minHeight: 120, maxHeight: 220)
+                if hasEmptyRows { Text("Rows without a value are left out. Fill them in or remove them.").font(.caption).foregroundStyle(.orange) }
                 GroupBox("Preview") {
-                    Text(draft.isEmpty ? "No activation condition configured." : draft)
+                    Text(predicate.isEmpty ? "No activation condition configured." : predicate)
                         .font(.system(.body, design: .monospaced)).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(8)
                 }
             } else {
                 TextEditor(text: $draft).font(.system(.body, design: .monospaced))
                     .frame(minHeight: 220).overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.25)))
+                Text("Apple predicate syntax, for example @status(device.operating-system.family) == 'iPadOS'. Saved as the step's activationPredicate.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
+            if tooLong { Text("The predicate is longer than \(ActivationPredicate.maxLength) characters, which Jamf does not accept.").font(.caption).foregroundStyle(.red) }
 
             Spacer()
             HStack {
-                Button("Clear Conditions", role: .destructive) { draft = "" }
+                Button("Clear Conditions", role: .destructive) { rows = []; draft = ""; note = nil }
                 Spacer()
                 Button("Cancel") { dismiss() }
                 Button("Save Conditions") {
-                    model.blueprintActivationCondition = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+                    model.blueprintActivationCondition = predicate
                     model.applyBlueprintGUIToJSON()
                     dismiss()
-                }.buttonStyle(.borderedProminent)
+                }.buttonStyle(.borderedProminent).disabled(tooLong)
             }
         }
-        .padding(22).frame(minWidth: 820, minHeight: 480)
-        .onAppear { draft = model.blueprintActivationCondition }
+        .padding(22).frame(minWidth: 860, minHeight: 520)
+        .onAppear { load() }
     }
 
-    @ViewBuilder private var valueEditor: some View {
-        if ["FileVault enabled", "Bootstrap token escrowed", "Supervised"].contains(attribute) {
-            Picker("Value", selection: $value) { Text("Yes").tag("true"); Text("No").tag("false") }.frame(width: 120)
-                .onAppear { if value.isEmpty { value = "true" } }
-        } else if attribute == "Architecture" {
-            Picker("Value", selection: $value) { Text("Apple silicon").tag("arm64"); Text("Intel").tag("x86_64") }.frame(width: 140)
-                .onAppear { if value.isEmpty { value = "arm64" } }
+    private func load() {
+        let existing = model.blueprintActivationCondition
+        if let parsed = ActivationPredicate.parse(existing) {
+            rows = parsed.rows.isEmpty ? [ActivationConditionRow()] : parsed.rows
+            match = parsed.match
+            mode = 0
         } else {
-            TextField("Value", text: $value).frame(minWidth: 170)
+            draft = existing
+            mode = 1
+            note = "This predicate uses syntax the Visual editor cannot show, so it opens in the Text editor and is saved exactly as written."
         }
     }
 
-    private var expression: String {
-        let key = attribute.replacingOccurrences(of: " ", with: "").prefix(1).lowercased() + attribute.replacingOccurrences(of: " ", with: "").dropFirst()
-        let op = ["is":"==", "is not":"!=", "contains":"contains", "does not contain":"notContains", "starts with":"startsWith", "does not start with":"notStartsWith", "ends with":"endsWith", "does not end with":"notEndsWith", "is like":"like", "is not like":"notLike", "matches":"matches", "does not match":"notMatches"][comparison] ?? comparison
-        if ["true", "false"].contains(value) { return "\(key) \(op) \(value)" }
-        let escaped = value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-        return "\(key) \(op) \"\(escaped)\""
+    private func conditionRow(_ row: Binding<ActivationConditionRow>) -> some View {
+        HStack(spacing: 10) {
+            Picker("Attribute", selection: Binding(get: { row.wrappedValue.attribute }, set: { newValue in
+                row.wrappedValue.attribute = newValue
+                row.wrappedValue.op = newValue.operators.first ?? .equals
+                row.wrappedValue.value = newValue == .group ? (model.groups.first?.id ?? "") : (newValue.choices.first ?? "")
+            })) { ForEach(ActivationAttribute.allCases) { Text($0.title).tag($0) } }
+                .labelsHidden().frame(width: 210)
+            Picker("Operator", selection: row.op) {
+                ForEach(row.wrappedValue.attribute.operators) { Text($0.title).tag($0) }
+            }.labelsHidden().frame(width: 190)
+            valueEditor(row)
+            Button { rows.removeAll { $0.id == row.wrappedValue.id } } label: { Image(systemName: "minus.circle") }
+                .buttonStyle(.borderless).help("Remove this condition")
+        }
+    }
+
+    @ViewBuilder private func valueEditor(_ row: Binding<ActivationConditionRow>) -> some View {
+        let attribute = row.wrappedValue.attribute
+        if attribute == .group {
+            Picker("Group", selection: row.value) {
+                if !model.groups.contains(where: { $0.id == row.wrappedValue.value }), !row.wrappedValue.value.isEmpty {
+                    Text("Group \(row.wrappedValue.value)").tag(row.wrappedValue.value)
+                }
+                ForEach(model.groups) { Text($0.name).tag($0.id) }
+            }.labelsHidden().frame(minWidth: 220)
+        } else if !attribute.choices.isEmpty {
+            Picker("Value", selection: row.value) {
+                if !attribute.choices.contains(row.wrappedValue.value) { Text(row.wrappedValue.value.isEmpty ? "Choose..." : row.wrappedValue.value).tag(row.wrappedValue.value) }
+                ForEach(attribute.choices, id: \.self) { Text($0).tag($0) }
+            }.labelsHidden().frame(minWidth: 220)
+        } else {
+            TextField("Value", text: row.value).frame(minWidth: 220)
+        }
     }
 }

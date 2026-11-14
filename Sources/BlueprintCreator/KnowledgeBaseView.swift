@@ -148,7 +148,7 @@ struct KnowledgeBaseView: View {
             heading("GUI and JSON Editor Walkthrough", "Edit one Blueprint through two synchronized views")
             numbered([
                 "Choose GUI for guided fields or JSON for direct serialized editing.",
-                "In GUI, edit the Blueprint name, description, first step name, and activation condition.",
+                "In GUI, edit the Blueprint name, description, first step name, and activation conditions. Add as many conditions as you need and choose Match all or Match any; they are saved as the step's activationPredicate in Apple predicate syntax. The Text editor accepts any predicate Jamf supports.",
                 "Select or clear component checkboxes to control which standard-conversion components remain in steps[0].components.",
                 "Choose Apply GUI Changes to JSON to serialize the guided changes.",
                 "In JSON, edit advanced fields directly. Valid JSON refreshes the GUI model; invalid JSON keeps the last valid GUI values.",
