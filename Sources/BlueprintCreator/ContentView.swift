@@ -196,23 +196,29 @@ struct ContentView: View {
         .padding(18)
     }
 
-    private var statusText: String { model.ready ? "API Ready" : "Setup required" }
-    private var statusColor: Color { model.ready ? .green : .orange }
+    /// Green when the connection passed its test, yellow while it is being checked, red otherwise.
+    private var statusText: String {
+        model.checkingConnection ? "Checking..." : (model.ready ? "API Ready" : "Check connection")
+    }
+    private var statusColor: Color {
+        model.checkingConnection ? .yellow : (model.ready ? .green : .red)
+    }
 
     private var statusLabel: some View {
         HStack(spacing: 6) {
-            if model.busy { ProgressView().controlSize(.small) }
-            else { Image(systemName: model.ready ? "checkmark.circle.fill" : "exclamationmark.triangle.fill") }
+            if model.checkingConnection { ProgressView().controlSize(.small) }
+            else { Image(systemName: model.ready ? "checkmark.circle.fill" : "xmark.octagon.fill") }
             Text(statusText)
         }
         .foregroundStyle(statusColor)
     }
 
-    /// One connection: the status label alone. Several: a name menu on the left to switch
-    /// environment, with the status on the right.
+    /// One connection: the status alone. Several: the status on the left and a name menu
+    /// on the right to switch environment.
     @ViewBuilder private var environmentStatus: some View {
         if model.connections.count > 1 {
             HStack(spacing: 10) {
+                statusLabel
                 Menu {
                     Section("Switch environment") {
                         ForEach(model.connections) { connection in
@@ -236,7 +242,6 @@ struct ContentView: View {
                 .fixedSize()
                 .disabled(model.busy)
                 .help("Switch the Jamf Platform environment")
-                statusLabel
             }
         } else {
             statusLabel

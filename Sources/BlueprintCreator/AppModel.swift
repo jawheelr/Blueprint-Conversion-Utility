@@ -8,6 +8,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var connections: [PlatformConnection] = []
     @Published private(set) var activeConnectionID: UUID?
     @Published var platformTested = false
+    /// True only while the Platform connection is being tested or its workspace loaded.
+    @Published private(set) var checkingConnection = false
     @Published var platformAuthenticationFailed = false
     @Published var platformCredentialHealth: PlatformCredentialHealth = .notConfigured
     @Published var profiles: [JamfProfile] = []
@@ -260,9 +262,10 @@ final class AppModel: ObservableObject {
         }
 
         busy = true
+        checkingConnection = true
         alert = nil
         platformTested = false
-        defer { busy = false }
+        defer { busy = false; checkingConnection = false }
         do {
             try await makePlatform().test()
             try await makeSourceProfiles().test()
@@ -294,9 +297,10 @@ final class AppModel: ObservableObject {
 
     func testPlatform() async {
         busy = true
+        checkingConnection = true
         status = "Testing Platform API and Platform profile gateway..."
         alert = nil
-        defer { busy = false }
+        defer { busy = false; checkingConnection = false }
         do {
             try await makePlatform().test()
             try await makeSourceProfiles().test()
