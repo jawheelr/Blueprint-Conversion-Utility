@@ -12,6 +12,7 @@ struct ConnectionsView: View {
     @State private var message = "Save and test the Platform API."
     @State private var cliTestOutput = "No jamf-cli test has been run."
     @State private var cliTestRunning = false
+    @State private var confirmRemove = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -46,7 +47,7 @@ struct ConnectionsView: View {
             .frame(maxWidth: .infinity)
 
             GroupBox {
-                if tab == 0 { platformForm } else if tab == 1 { jamfCLIForm } else { AdvisorSettingsForm() }
+                if tab == 0 { VStack(spacing: 0) { connectionPicker; Divider(); platformForm } } else if tab == 1 { jamfCLIForm } else { AdvisorSettingsForm() }
             }
             .frame(maxHeight: .infinity)
 
@@ -124,6 +125,47 @@ struct ConnectionsView: View {
 
 
 
+
+    private var connectionPicker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Picker("Connection", selection: Binding(
+                    get: { model.activeConnectionID ?? UUID() },
+                    set: { id in Task { await model.selectConnection(id, validate: false) } }
+                )) {
+                    ForEach(model.connections) { Text($0.displayName).tag($0.id) }
+                }
+                .frame(maxWidth: 360)
+                .disabled(model.busy)
+                Button { model.addConnection() } label: { Label("Add", systemImage: "plus") }
+                    .disabled(model.busy)
+                Button(role: .destructive) { confirmRemove = true } label: { Label("Remove", systemImage: "minus") }
+                    .disabled(model.busy || model.connections.count < 2)
+                Spacer()
+            }
+            HStack {
+                Text("Name").frame(width: 70, alignment: .leading)
+                TextField("Connection name", text: Binding(
+                    get: { model.activeConnectionDraftName },
+                    set: { model.setActiveConnectionName($0) }
+                ))
+                .frame(maxWidth: 360)
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .confirmationDialog(
+            "Remove \(model.activeConnectionName)?",
+            isPresented: $confirmRemove,
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) { Task { await model.deleteActiveConnection() } }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Its saved client secret is deleted from the Keychain.")
+        }
+    }
 
     private var platformForm: some View {
         Form {

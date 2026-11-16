@@ -189,16 +189,51 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Label(
-                model.ready ? "APIs ready" : "Setup required",
-                systemImage: model.ready
-                    ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
-            )
-            .foregroundStyle(model.ready ? .green : .orange)
+            environmentStatus
             Button("View Logs") { model.showLogs = true }
             Button("Connections") { model.showConnections = true }
         }
         .padding(18)
+    }
+
+    private var statusText: String { model.ready ? "APIs ready" : "Setup required" }
+    private var statusColor: Color { model.ready ? .green : .orange }
+
+    /// One connection: the plain status label. Several: a menu to switch environment.
+    @ViewBuilder private var environmentStatus: some View {
+        if model.connections.count > 1 {
+            Menu {
+                Section("Switch environment") {
+                    ForEach(model.connections) { connection in
+                        Button {
+                            Task { await model.selectConnection(connection.id) }
+                        } label: {
+                            if connection.id == model.activeConnectionID {
+                                Label("\(connection.displayName) — \(connection.menuDetail)", systemImage: "checkmark")
+                            } else {
+                                Text("\(connection.displayName) — \(connection.menuDetail)")
+                            }
+                        }
+                    }
+                }
+                Divider()
+                Button("Manage Connections...") { model.showConnections = true }
+            } label: {
+                HStack(spacing: 6) {
+                    if model.busy { ProgressView().controlSize(.small) }
+                    else { Image(systemName: model.ready ? "checkmark.circle.fill" : "exclamationmark.triangle.fill") }
+                    Text("\(model.activeConnectionName) · \(statusText)")
+                }
+                .foregroundStyle(statusColor)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .disabled(model.busy)
+            .help("Switch the Jamf Platform environment")
+        } else {
+            Label(statusText, systemImage: model.ready ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(statusColor)
+        }
     }
 
     private var scopeBanner: some View {

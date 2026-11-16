@@ -159,6 +159,7 @@ struct KnowledgeBaseView: View {
         case .platform:
             heading("Platform API", "Connection and permissions")
             paragraph("Connections requires the regional Platform URL, client ID, client secret, and Platform Environment ID. The client secret is stored in macOS Keychain.")
+            paragraph("You can save several Platform connections, for example production and sandbox. Use Add in Connections > Platform API, give each a name, then save and test it. With more than one connection, the status pill in the header becomes a menu: choose an environment to test it and reload its profiles and groups. Each connection keeps its own client secret in Keychain, and the bcu command line tool follows the active connection.")
             bullets([
                 "OAuth token endpoint: /auth/token",
                 "Mobile profiles: /proclassic/mobiledeviceconfigurationprofiles",
