@@ -236,9 +236,19 @@ struct ContentView: View {
                     Divider()
                     Button("Manage Connections...") { model.showConnections = true }
                 } label: {
-                    Text(model.activeConnectionName)
+                    HStack(spacing: 6) {
+                        Image(systemName: "server.rack").font(.caption)
+                        Text(model.activeConnectionName).lineLimit(1)
+                        Image(systemName: "chevron.down").font(.caption2.weight(.semibold))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                    .overlay(Capsule().stroke(Color.accentColor.opacity(0.45), lineWidth: 1))
+                    .contentShape(Capsule())
                 }
                 .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
                 .fixedSize()
                 .disabled(model.busy)
                 .help("Switch the Jamf Platform environment")
