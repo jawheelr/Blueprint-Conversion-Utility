@@ -61,7 +61,7 @@ struct KnowledgeBaseView: View {
             heading("Admin Start Guide", "Prepare, analyze, review, and deploy safely")
             paragraph("Use this guide as the standard administrator workflow for production conversions.")
             subsection("Before you begin")
-            bullets(["Confirm APIs ready.", "Start with a controlled Platform Device Group.", "Keep a rollback plan and do not unscope the source profile until deployment and representative-device behavior are validated."])
+            bullets(["Confirm the header shows API Ready.", "Start with a controlled Platform Device Group.", "Keep a rollback plan and do not unscope the source profile until deployment and representative-device behavior are validated."])
             subsection("Administrator workflow")
             numbered(["Configure and test Connections.", "Select a Configuration Profile and wait for profile-specific jamf-cli analysis.", "Review the Recommended Approach, then explicitly choose an alternative only when intended.", "Confirm Approach, Scope, and Target Group. Target Group appears below Scope when Choose Another Group is selected.", "Run Dry Run and review Advanced jamf-cli Activity for the currently selected profile.", "Create Only first, inspect the Blueprint, deploy to a controlled group, and validate representative devices.", "Authorize source-profile unscoping separately only after successful validation."])
             subsection("Profile Inspector placement")

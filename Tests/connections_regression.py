@@ -25,7 +25,7 @@ checks={
 'add and delete':'func addConnection()' in app and 'func deleteActiveConnection()' in app and 'KeychainStore.deleteSecret(for: id)' in app,
 'delete keeps one':'connections.count > 1' in app,
 'header menu only for several':'model.connections.count > 1' in cv and 'Switch environment' in cv and 'Manage Connections...' in cv,
-'header keeps single label':'statusText' in cv and 'APIs ready' in cv and 'Setup required' in cv,
+'header keeps single label':'statusText' in cv and 'API Ready' in cv and 'Setup required' in cv,
 'menu disabled while busy':'.disabled(model.busy)' in cv,
 'active name in header':'model.activeConnectionName' in cv,
 'connections picker row':'connectionPicker' in cn and 'model.addConnection()' in cn and 'confirmationDialog' in cn,
