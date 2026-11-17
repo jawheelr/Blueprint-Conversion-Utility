@@ -20,9 +20,13 @@ BCU helps administrators move Configuration Profile management toward Jamf Platf
 - Blueprint deployment
 - Deployment validation
 - Source-profile lifecycle actions
+- Apple Device Management schema details for every key
+- Per-setting recommendations in the Profile Inspector
+- Plain-language Explain & Recommend guidance
+- Multiple Jamf Platform environments
 - Activity history and application logs
 
-BCU also integrates `jamf-cli` analysis into the workflow to provide additional guidance before changes are made.
+BCU bundles `jamf-cli` and integrates its analysis into the workflow to provide additional guidance before changes are made. A companion `bcu` command-line tool is installed alongside the app.
 
 ---
 
@@ -49,10 +53,10 @@ BCU provides a guided workflow that generally follows these steps:
 2. 💻 Select **Computers** or **Mobile Devices**.
 3. 📄 Select a source Configuration Profile.
 4. 🔍 Allow BCU to analyze the selected profile.
-5. 🤖 Review the `jamf-cli` analysis and recommendation.
+5. 🤖 Review the `jamf-cli` analysis and recommendation, and open **Explain & Recommend** if you want it in plain language.
 6. 🎯 Review the source profile's scope.
 7. 👥 Select a compatible target group when required.
-8. 🧩 Review Blueprint properties and editable values.
+8. 🧩 Review Blueprint properties and editable values, and open the **Profile Inspector** for setting-level detail.
 9. ⚙️ Review payloads, components, and Activation Conditions.
 10. 🧪 Run a **Dry Run**.
 11. ⚠️ Review warnings, dropped settings, and proposed changes.
@@ -186,6 +190,73 @@ BCU's workflow keeps target selection visible so that administrators can review 
 
 ---
 
+# 🌐 Multiple Jamf Environments
+
+BCU can store more than one Jamf Platform connection, for example production, sandbox, and other tenants.
+
+- 🔌 Open **Connections** and use the connection picker to **Add** or **Remove** a connection and give each one a name.
+- 🔐 Each connection keeps its own client secret in the macOS Keychain. Secrets are never stored in preferences or logs.
+- 🔽 When more than one connection exists, a dropdown appears next to the status in the header. Pick an environment to switch to it.
+- 🟢 The header status shows **API Ready** (green), **Checking…** (yellow), or **Check connection** (red) for the active connection.
+- 🧹 Switching environments clears the selected profile, groups, analysis, and Blueprint state, then tests the new connection and reloads, so one tenant's data is never shown under another.
+- 💻 The `bcu` command-line tool always follows the active connection.
+
+> ⚠️ Confirm the environment name in the header before running anything that creates, deploys, or unscopes.
+
+---
+
+# 🔬 Profile Inspector
+
+The **Profile Inspector** opens from the Blueprint editor or **Help > Profile Inspector** once the selected profile has been parsed. It is read-only: the source Configuration Profile is never modified.
+
+It lets you walk every payload and nested key in the profile and see:
+
+- 🌳 The full payload tree with search and expandable keys
+- 💡 A recommendation for each setting: **Keep**, **Convert**, **Edit Before Conversion**, **Replace**, **Remove**, **Preserve as Legacy**, **Review**, or **Metadata**
+- ⏱️ When to edit: before Blueprint creation, during BCU review, after creation, or not at all
+- 🎯 Confidence and the evidence behind each recommendation
+- 🧬 Whether the setting is a native Blueprint component, a configuration-profile wrapper, or unknown
+- 📖 The matching Apple schema definition, with a shortcut to open it in the Schema Browser
+- 🚦 A **Findings** filter to show only items that need action
+
+## ✍️ Resolving Recommendations
+
+For settings that need a decision, choose **Resolve** and pick:
+
+- ✅ **Apply to Destination** to record your proposed value for the generated Blueprint
+- 📌 **Keep Source Value** to preserve the current value
+- 🕒 **Review Later** to leave the finding open
+
+Decisions apply only to the generated Blueprint. The Inspector keeps a count of unresolved recommendations so nothing is forgotten before you execute.
+
+---
+
+# 📚 Apple Schema Browser
+
+The **Apple Schema Browser** (**Help > Apple Schema Browser**, or the header button) includes a compiled copy of Apple's Device Management schema.
+
+- 🔎 Search by friendly name, identifier, raw key, description, or nested path
+- 🧭 Filter by device family and lifecycle (current, deprecated, removed)
+- 🌲 Expand nested keys with disclosure arrows
+- 🍎 See platform support for each object
+- 🏷️ Lifecycle badges, wildcard keys, and recursive references are shown
+- 📋 Copy keys and identifiers
+
+The Schema Browser is diagnostic. It never changes a profile or Blueprint.
+
+---
+
+# 🧠 Explain & Recommend
+
+**Explain & Recommend** (**Help > Explain & Recommend**) turns the technical `jamf-cli` verdict into plain language: what the profile does, why a takeover or conversion is or is not recommended, and what to check next.
+
+- 🍏 Uses Apple Intelligence on-device summaries when your Mac supports and has enabled them. Nothing is sent to an outside service.
+- 📖 Uses built-in guidance drawn from the bundled `jamf-cli` documentation when Apple Intelligence is unavailable.
+- ⚙️ Turn the AI summary on or off any time in **Connections > Explain & Recommend**. If it is off at the system level, BCU offers to open Apple Intelligence settings.
+- ⚠️ If a profile has no associated group, the card explains that the evaluation is incomplete because of that, and what to do about it.
+
+---
+
 # 🧩 Blueprint Configuration
 
 Before execution, BCU presents the proposed Blueprint configuration for review.
@@ -233,9 +304,18 @@ A Blueprint may be successfully created while still requiring administrator revi
 
 Activation Conditions determine when applicable Blueprint configuration should activate.
 
-Review generated or proposed Activation Conditions before creating the Blueprint.
+The visual editor lets you build them without writing predicates:
 
-BCU keeps this information visible during the conversion workflow so that the administrator can verify that the resulting behavior matches the intended device configuration.
+- ➕ **Add Condition** for as many rows as you need, and remove any row
+- 🔀 Choose **Match all** (AND) or **Match any** (OR)
+- 🖥️ Pick an attribute such as operating system, version, build, device family, model, serial number, battery health, or device group
+- 🔣 Pick an operator such as is, is not, contains, starts with, is at least, or is a member of
+- 👁️ See the live predicate preview as you build
+- 📝 Switch to **Text** mode for predicates the visual editor cannot represent. BCU keeps your original text rather than rewriting it.
+
+BCU saves the result in the Blueprint step's `activationPredicate` field, using Apple's declarative predicate syntax (limited to 10,000 characters).
+
+Review generated or proposed Activation Conditions before creating the Blueprint, so the resulting behavior matches the intended device configuration.
 
 ---
 
@@ -712,23 +792,51 @@ For production use:
 - ✅ Confirm deployment before unscoping the source profile.
 - 📜 Keep application logs available while validating major migrations.
 - 🚫 Avoid retrying creation blindly after partial completion.
+- 🔬 Resolve or consciously defer every Profile Inspector recommendation.
+- 🌐 Confirm the active environment in the header before any production change.
+
+---
+
+# 💻 The `bcu` Command-Line Tool
+
+The installer places `bcu` at `/usr/local/bin/bcu`. It reads the active connection from the app and never prints the client secret.
+
+```bash
+bcu version
+bcu connection status
+bcu connection test
+bcu credentials status
+bcu profiles list --type computer
+bcu profiles list --type mobile --output json
+bcu groups list --type computer
+bcu logs show --last 1h
+bcu logs stream --category Deployment
+bcu app open
+bcu app check-for-updates
+```
+
+Text and JSON output are supported where applicable.
 
 ---
 
 # ⬆️ Updating BCU
 
-BCU may evolve as Jamf Platform Blueprint capabilities and APIs change.
+Releases are signed with a Developer ID certificate and notarized by Apple.
 
-When updating BCU:
+- 🔔 BCU checks GitHub Releases on first launch and then at most weekly. Choose **Help > Check for Updates...** at any time.
+- 📝 When a newer release exists, a window shows the release notes with **Download and Install**.
+- 📦 The installer package is verified before the native macOS Installer opens. Updates are never installed silently.
+- 🔁 After installation, BCU relaunches into the new version.
+- 🧰 The bundled `jamf-cli` is kept current with `jamf-cli` releases.
 
-1. Review the release information accompanying the build.
-2. Confirm that your Jamf API credentials still provide the necessary permissions.
-3. Test important workflows before performing a production migration.
-4. Re-run analysis for profiles that were evaluated using an older build if conversion behavior has changed.
+When updating:
 
-This README intentionally avoids tying the workflow to a specific BCU release number so that the primary documentation remains useful across application updates.
+1. Review the release notes.
+2. Confirm your Jamf API credentials still provide the necessary permissions.
+3. Test important workflows before a production migration.
+4. Re-run analysis for profiles that were evaluated with an older build if conversion behavior has changed.
 
-Release-specific behavior, fixes, and upgrade information should be documented separately in release notes or a changelog.
+This README intentionally avoids tying the workflow to a specific BCU release number. Release-specific changes are in the [release notes](https://github.com/jawheelr/Blueprint-Conversion-Utility/releases).
 
 ---
 
