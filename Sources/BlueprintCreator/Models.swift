@@ -37,6 +37,53 @@ struct AppSettings: Codable, Equatable {
     }
 }
 
+/// One saved Jamf Platform environment. The client secret is not stored here; it lives
+/// in the Keychain under this connection's id (see `KeychainStore`).
+struct PlatformConnection: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var name = ""
+    var platformURL = "https://us.api.jamfcloud.com"
+    var platformClientID = ""
+    var environmentID = ""
+    var integrationExpirationDate: Date?
+    var expiryWarningDays = 30
+
+    init() { }
+
+    init(id: UUID = UUID(), name: String, settings: AppSettings) {
+        self.id = id
+        self.name = name
+        platformURL = settings.platformURL
+        platformClientID = settings.platformClientID
+        environmentID = settings.environmentID
+        integrationExpirationDate = settings.integrationExpirationDate
+        expiryWarningDays = settings.expiryWarningDays
+    }
+
+    /// The working settings for this connection.
+    func applied() -> AppSettings {
+        var settings = AppSettings()
+        settings.platformURL = platformURL
+        settings.platformClientID = platformClientID
+        settings.environmentID = environmentID
+        settings.integrationExpirationDate = integrationExpirationDate
+        settings.expiryWarningDays = expiryWarningDays
+        return settings
+    }
+
+    var displayName: String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Unnamed connection" : trimmed
+    }
+
+    /// Host and a short environment ID, so similarly named connections stay distinguishable.
+    var menuDetail: String {
+        let host = URLComponents(string: platformURL)?.host ?? platformURL
+        let env = environmentID.trimmingCharacters(in: .whitespaces)
+        return env.isEmpty ? host : "\(host) · env \(env.prefix(8))"
+    }
+}
+
 enum PlatformCredentialHealth: Equatable {
     case notConfigured
     case valid(daysRemaining: Int, expirationDate: Date)

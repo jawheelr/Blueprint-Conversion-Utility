@@ -5,7 +5,11 @@ import AppKit
 final class AppModel: ObservableObject {
     @Published var settings: AppSettings
     @Published var platformSecret: String
+    @Published private(set) var connections: [PlatformConnection] = []
+    @Published private(set) var activeConnectionID: UUID?
     @Published var platformTested = false
+    /// True only while the Platform connection is being tested or its workspace loaded.
+    @Published private(set) var checkingConnection = false
     @Published var platformAuthenticationFailed = false
     @Published var platformCredentialHealth: PlatformCredentialHealth = .notConfigured
     @Published var profiles: [JamfProfile] = []
@@ -117,14 +121,134 @@ final class AppModel: ObservableObject {
 
     init() {
         LegacyIdentityMigration.runIfNeeded()
-        if let data = UserDefaults.standard.data(forKey: "BlueprintCreator.Settings"),
-           let saved = try? JSONDecoder().decode(AppSettings.self, from: data) {
-            settings = saved
-        } else {
-            settings = AppSettings()
-        }
-        platformSecret = KeychainStore.readSecret() ?? ""
+        let stored = ConnectionStore.loadOrMigrate()
+        let active = stored.connections.first { $0.id == stored.activeID } ?? stored.connections[0]
+        connections = stored.connections
+        activeConnectionID = active.id
+        settings = active.applied()
+        platformSecret = KeychainStore.readSecret(for: active.id) ?? ""
         refreshPlatformCredentialHealth()
+    }
+
+    // MARK: - Platform connections
+
+    var activeConnectionName: String {
+        connections.first { $0.id == activeConnectionID }?.displayName ?? "Platform"
+    }
+
+    var activeConnectionDraftName: String {
+        connections.first { $0.id == activeConnectionID }?.name ?? ""
+    }
+
+    func setActiveConnectionName(_ name: String) {
+        guard let index = connections.firstIndex(where: { $0.id == activeConnectionID }) else { return }
+        connections[index].name = name
+    }
+
+    /// Writes the edited settings into the active connection and mirrors it for `bcu`.
+    private func persistActiveConnection() throws {
+        guard let id = activeConnectionID, let index = connections.firstIndex(where: { $0.id == id }) else { return }
+        let name = connections[index].name
+        connections[index] = PlatformConnection(id: id, name: name, settings: settings)
+        if !platformSecret.isEmpty { try KeychainStore.saveSecret(platformSecret, for: id) }
+        try ConnectionStore.save(StoredConnections(connections: connections, activeID: id))
+        try mirrorActiveConnection()
+    }
+
+    private func mirrorActiveConnection() throws {
+        try ConnectionStore.mirrorActive(settings)
+        if platformSecret.isEmpty { KeychainStore.deleteMirroredSecret() }
+        else { try KeychainStore.saveSecret(platformSecret) }
+    }
+
+    private func applyConnection(_ connection: PlatformConnection) {
+        activeConnectionID = connection.id
+        settings = connection.applied()
+        platformSecret = KeychainStore.readSecret(for: connection.id) ?? ""
+        try? ConnectionStore.save(StoredConnections(connections: connections, activeID: connection.id))
+        try? mirrorActiveConnection()
+        refreshPlatformCredentialHealth()
+    }
+
+    /// Clears everything loaded from the previous environment so no profile, group or
+    /// result from another tenant can remain on screen.
+    private func resetWorkspaceForConnectionChange() {
+        takeoverEvaluationTask?.cancel()
+        adviceTask?.cancel()
+        profileLoadGeneration += 1
+        conversionGeneration += 1
+        jsonProfileID = nil
+        selectedProfileID = nil
+        loadingProfileID = nil
+        selectedProfile = nil
+        selectedGroup = nil
+        originalMatchedGroup = nil
+        profiles = []
+        allGroups = []
+        groups = []
+        hasMoreGroups = false
+        nextGroupPage = 0
+        scopeNotice = ""
+        json = "Configure and test the Platform API to begin."
+        takeoverVerdict = .notEvaluated
+        takeoverMessages = []
+        takeoverRawOutput = ""
+        takeoverEvaluationState = .notEvaluated
+        conversionWarnings = []
+        conversionReady = false
+        advice = nil
+        adviceRefreshing = false
+        profileInspection = nil
+        recommendedApproach = .analyzing
+        selectedApproach = .analyzing
+        hasUserSelectedApproach = false
+        recommendationReasons = ["Select a configuration profile."]
+        lastTakeoverBlueprintID = nil
+        lastTakeoverDeploymentValidated = false
+        deploymentEligibility = .blocked(["Run Dry Run first."])
+        platformTested = false
+        platformAuthenticationFailed = false
+        alert = nil
+    }
+
+    /// Switches the active environment. From the header (`validate: true`) the new
+    /// connection is tested and its workspace loaded; from the Connections window the
+    /// connection is only selected for editing and tested with the Test button.
+    func selectConnection(_ id: UUID, validate: Bool = true) async {
+        guard id != activeConnectionID, !busy,
+              let target = connections.first(where: { $0.id == id }) else { return }
+        try? persistActiveConnection()
+        resetWorkspaceForConnectionChange()
+        applyConnection(target)
+        AppLogger.connections.info("Switched Platform connection")
+        if validate && complete {
+            status = "Switching to \(target.displayName)..."
+            await launch()
+        } else {
+            status = complete ? "Test the Platform API for \(target.displayName)." : "Enter the Platform API details for \(target.displayName)."
+        }
+    }
+
+    func addConnection() {
+        guard !busy else { return }
+        try? persistActiveConnection()
+        resetWorkspaceForConnectionChange()
+        var connection = PlatformConnection()
+        connection.name = "New connection"
+        connections.append(connection)
+        applyConnection(connection)
+        status = "Enter the Platform API details for the new connection."
+    }
+
+    func deleteActiveConnection() async {
+        guard !busy, connections.count > 1, let id = activeConnectionID else { return }
+        connections.removeAll { $0.id == id }
+        KeychainStore.deleteSecret(for: id)
+        resetWorkspaceForConnectionChange()
+        applyConnection(connections[0])
+        AppLogger.connections.info("Removed a Platform connection")
+        if complete { status = "Switching to \(activeConnectionName)..."; await launch() }
+        else { status = "Enter the Platform API details for \(activeConnectionName)." }
     }
 
 
@@ -138,9 +262,10 @@ final class AppModel: ObservableObject {
         }
 
         busy = true
+        checkingConnection = true
         alert = nil
         platformTested = false
-        defer { busy = false }
+        defer { busy = false; checkingConnection = false }
         do {
             try await makePlatform().test()
             try await makeSourceProfiles().test()
@@ -165,20 +290,17 @@ final class AppModel: ObservableObject {
                 "Complete the Platform API URL, Client ID, Client Secret, and Platform Environment ID."
             )
         }
-        try KeychainStore.saveSecret(platformSecret)
-        UserDefaults.standard.set(
-            try JSONEncoder().encode(settings),
-            forKey: "BlueprintCreator.Settings"
-        )
+        try persistActiveConnection()
         status = ready ? "Platform API connection passed." : "Saved. Test the Platform API."
         AppLogger.connections.info("Platform API connection settings saved")
     }
 
     func testPlatform() async {
         busy = true
+        checkingConnection = true
         status = "Testing Platform API and Platform profile gateway..."
         alert = nil
-        defer { busy = false }
+        defer { busy = false; checkingConnection = false }
         do {
             try await makePlatform().test()
             try await makeSourceProfiles().test()
