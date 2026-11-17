@@ -2,7 +2,14 @@ import Foundation
 import Security
 import Darwin
 
-private let cliVersion = "3.5.0"
+/// The CLI ships inside the app at Contents/Resources/bin, so it reports the app's own version.
+private let cliVersion: String = {
+    guard let executable = Bundle.main.executableURL?.resolvingSymlinksInPath() else { return "dev" }
+    let contents = executable.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    let plist = contents.appendingPathComponent("Info.plist")
+    guard let info = NSDictionary(contentsOf: plist), let version = info["CFBundleShortVersionString"] as? String else { return "dev" }
+    return version
+}()
 private let settingsKey = "BlueprintCreator.Settings"
 private let bundleIdentifier = "com.jawheelr.blueprintcreator"
 private let keychainService = "com.jawheelr.blueprintcreator"
