@@ -16,6 +16,39 @@ enum KeychainStore {
     private static let account = "platform-api-client-secret"
     private static let legacyAccount = "api-client-secrets"
 
+    // MARK: Per-connection secrets
+
+    private static func account(for id: UUID) -> String { "\(account).\(id.uuidString.lowercased())" }
+
+    static func saveSecret(_ platform: String, for id: UUID) throws {
+        guard !platform.isEmpty else {
+            throw AppFailure.message("Platform API client secret is required.")
+        }
+        let data = try JSONEncoder().encode(PlatformSecret(platformClientSecret: platform))
+        try upsert(data: data, service: service, account: account(for: id))
+    }
+
+    static func readSecret(for id: UUID) -> String? {
+        decodePlatformSecret(read(service: service, account: account(for: id)))
+    }
+
+    static func deleteSecret(for id: UUID) {
+        SecItemDelete([
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account(for: id)
+        ] as CFDictionary)
+    }
+
+    /// The single-secret item the bcu command line tool reads; it always mirrors the active connection.
+    static func deleteMirroredSecret() {
+        SecItemDelete([
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ] as CFDictionary)
+    }
+
     static func saveSecret(_ platform: String) throws {
         guard !platform.isEmpty else {
             throw AppFailure.message("Platform API client secret is required.")
