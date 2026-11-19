@@ -233,7 +233,7 @@ Decisions apply only to the generated Blueprint. The Inspector keeps a count of 
 
 # 🗂️ Blueprints Explorer
 
-The **Blueprints Explorer** (header **Blueprints** button, or **Blueprint > Blueprints Explorer**) lets you inspect and edit Blueprints that already exist on the active connection, including components Jamf's own interface cannot edit.
+The **Blueprints Explorer** (the header button, or **Blueprint > Blueprints Explorer**) lets you inspect and edit Blueprints that already exist on the active connection, including components Jamf's own interface cannot edit.
 
 - 📋 Browse and search every Blueprint, with Deployed, Not deployed, and Out of date badges
 - 🌳 Walk a Blueprint's details, scope, steps, and components in an outline

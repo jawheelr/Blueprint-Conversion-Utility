@@ -191,7 +191,7 @@ struct ContentView: View {
             }
             Spacer()
             environmentStatus
-            Button("Blueprints") { model.showExplorer = true }.disabled(!model.ready || model.busy)
+            Button("Blueprints Explorer") { model.showExplorer = true }.disabled(!model.ready || model.busy)
             Button("View Logs") { model.showLogs = true }
             Button("Connections") { model.showConnections = true }
         }

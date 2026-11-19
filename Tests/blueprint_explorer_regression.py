@@ -15,7 +15,7 @@ checks={
 'undeploy client':'/undeploy' in api,
 'ids validated':api.count('Validators.requireSafeIdentifier')>=5,
 'sheet':'$model.showExplorer' in content and 'BlueprintExplorerView()' in content,
-'header button':'Button("Blueprints")' in content,
+'header button':'Button("Blueprints Explorer")' in content,
 'menu':'Blueprints Explorer' in root,
 'connection reset':'resetExplorer()' in app and 'showExplorer = false' in ext,
 'stale guard':'explorerGeneration' in ext and 'guard generation == explorerGeneration' in ext,
@@ -27,6 +27,7 @@ checks={
 'raw json fallback':'Raw JSON' in comp and 'Apply JSON' in comp,
 'schema forms':'ExplorerSchemaResolver' in comp and 'enumChoices' in comp,
 'number types kept':'static func number(from' in models and 'Int64(trimmed)' in models,
+'knowledge base topic':'case explorer = "Blueprints Explorer"' in Path('Sources/BlueprintCreator/KnowledgeBaseView.swift').read_text() and 'case .explorer:' in Path('Sources/BlueprintCreator/KnowledgeBaseView.swift').read_text(),
 'no secrets logged':'platformSecret' not in ext and 'clientSecret' not in ext,
 }
 bad=[k for k,v in checks.items() if not v]
