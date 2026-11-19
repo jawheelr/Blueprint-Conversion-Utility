@@ -47,6 +47,17 @@ final class AppModel: ObservableObject {
     @Published var showAbout = false
     @Published var showKB = false
     @Published var showAppleSchema = false
+    @Published var showExplorer = false
+    @Published var explorerBlueprints: [ExplorerBlueprintSummary] = []
+    @Published var explorerSelectedID: String?
+    @Published var explorerDraft: [String: Any]?
+    @Published var explorerOriginal: [String: Any]?
+    @Published var explorerLoading = false
+    @Published var explorerWorking = false
+    @Published var explorerMessage: String?
+    @Published var explorerSchema: AppleSchemaCatalog?
+    @Published var explorerPendingAction: ExplorerAction?
+    var explorerGeneration = 0
     @Published var showProfileInspector = false
     @Published var showAdvisor = false
     @Published var advice: AdvisorAdvice?
@@ -209,6 +220,7 @@ final class AppModel: ObservableObject {
         platformTested = false
         platformAuthenticationFailed = false
         alert = nil
+        resetExplorer()
     }
 
     /// Switches the active environment. From the header (`validate: true`) the new
@@ -1483,7 +1495,7 @@ final class AppModel: ObservableObject {
     }
 
 
-    private func makePlatform() throws -> PlatformClient {
+    func makePlatform() throws -> PlatformClient {
         try PlatformClient(
             url: settings.platformURL,
             clientID: settings.platformClientID,

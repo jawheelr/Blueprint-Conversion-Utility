@@ -36,6 +36,7 @@ struct ContentView: View {
         .sheet(isPresented: $model.showProfileInspector) { ProfileInspectorView().environmentObject(model) }
         .sheet(isPresented: $model.showAdvisor) { AdvisorPanel().environmentObject(model) }
         .sheet(isPresented: $model.showLogs) { LogsView() }
+        .sheet(isPresented: $model.showExplorer) { BlueprintExplorerView().environmentObject(model) }
         .sheet(isPresented: $model.showDeploymentReview) {
             DeploymentReviewView().environmentObject(model)
         }
@@ -190,6 +191,7 @@ struct ContentView: View {
             }
             Spacer()
             environmentStatus
+            Button("Blueprints") { model.showExplorer = true }.disabled(!model.ready || model.busy)
             Button("View Logs") { model.showLogs = true }
             Button("Connections") { model.showConnections = true }
         }

@@ -433,6 +433,48 @@ actor PlatformClient {
         )
     }
 
+    /// Lists every blueprint. Stops on an empty page because the server can clamp the page size.
+    func listBlueprints() async throws -> [ExplorerBlueprintSummary] {
+        var all: [ExplorerBlueprintSummary] = []
+        var page = 0
+        while page < 200 {
+            let data = try await request(
+                path: "blueprints/v1/blueprints", method: "GET", body: nil,
+                queryItems: [URLQueryItem(name: "page", value: String(page)), URLQueryItem(name: "page-size", value: "100")]
+            )
+            let object = try JSONSerialization.jsonObject(with: data)
+            let dictionary = object as? [String: Any]
+            let records = dictionary?["results"] as? [[String: Any]]
+                ?? dictionary?["items"] as? [[String: Any]]
+                ?? dictionary?["data"] as? [[String: Any]]
+                ?? (object as? [[String: Any]]) ?? []
+            if records.isEmpty { break }
+            all += records.compactMap(ExplorerBlueprintSummary.init(json:))
+            page += 1
+        }
+        return all
+    }
+
+    /// Full blueprint (scope and steps) as raw JSON.
+    func blueprintJSON(id: String) async throws -> Data {
+        let safeID = try Validators.requireSafeIdentifier(id, label: "Blueprint ID")
+        return try await request(path: "blueprints/v1/blueprints/\(safeID)", method: "GET", body: nil)
+    }
+
+    /// Merge-patch update. Arrays are replaced, so callers send the complete steps and scope.
+    func updateBlueprint(id: String, body: Data) async throws {
+        let safeID = try Validators.requireSafeIdentifier(id, label: "Blueprint ID")
+        _ = try await request(
+            path: "blueprints/v1/blueprints/\(safeID)", method: "PATCH", body: body,
+            contentType: "application/merge-patch+json"
+        )
+    }
+
+    func undeployBlueprint(id: String) async throws {
+        let safeID = try Validators.requireSafeIdentifier(id, label: "Blueprint ID")
+        _ = try await request(path: "blueprints/v1/blueprints/\(safeID)/undeploy", method: "POST", body: Data())
+    }
+
     func blueprintDeploymentState(id: String) async throws -> String? {
         _ = try Validators.requireSafeIdentifier(id, label: "Blueprint ID")
         let response = try await request(
@@ -482,7 +524,8 @@ actor PlatformClient {
         path: String,
         method: String,
         body: Data?,
-        queryItems: [URLQueryItem] = []
+        queryItems: [URLQueryItem] = [],
+        contentType: String = "application/json"
     ) async throws -> Data {
         let token = try await authenticate()
         let endpoint = baseURL.appendingPathComponent(path)
@@ -500,7 +543,7 @@ actor PlatformClient {
 
         if let body {
             request.httpBody = body
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
 
         let (data, response) = try await URLSession.shared.data(for: request)

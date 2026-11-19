@@ -231,6 +231,30 @@ Decisions apply only to the generated Blueprint. The Inspector keeps a count of 
 
 ---
 
+# 🗂️ Blueprints Explorer
+
+The **Blueprints Explorer** (header **Blueprints** button, or **Blueprint > Blueprints Explorer**) lets you inspect and edit Blueprints that already exist on the active connection, including components Jamf's own interface cannot edit.
+
+- 📋 Browse and search every Blueprint, with Deployed, Not deployed, and Out of date badges
+- 🌳 Walk a Blueprint's details, scope, steps, and components in an outline
+- 🎛️ Edit component settings with typed controls (toggles, numbers, choices, text, lists) driven by Apple's schema, with descriptions and ranges
+- 🧾 Fall back to a **Raw JSON** tab for any component the schema does not describe
+- 👥 Add or remove scope groups
+- ⚡ Edit activation conditions with the same visual editor used for new Blueprints
+- 🚀 **Deploy**, **Redeploy**, **Undeploy**, or **Save and Deploy**, each with a confirmation and a read-back of the resulting state
+
+Safeguards:
+
+- 💾 Nothing is sent to Jamf until you confirm **Save Changes**, and the confirmation lists what changed.
+- 🛑 If the Blueprint changed in Jamf after you opened it, BCU asks you to reload instead of overwriting it.
+- ✅ BCU checks for an empty name, an empty scope, missing steps or components, and over-long activation conditions before saving.
+- 🔄 A deployed Blueprint shows **Out of date** after an edit until it is deployed again.
+- 🔁 Switching environments closes the Explorer and clears everything it loaded.
+
+> ⚠️ Jamf validates component settings loosely. Review edits carefully, and test on a non-production Blueprint first.
+
+---
+
 # 📚 Apple Schema Browser
 
 The **Apple Schema Browser** (**Help > Apple Schema Browser**, or the header button) includes a compiled copy of Apple's Device Management schema.
