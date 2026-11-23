@@ -23,6 +23,7 @@ BCU helps administrators move Configuration Profile management toward Jamf Platf
 - Apple Device Management schema details for every key
 - Per-setting recommendations in the Profile Inspector
 - Plain-language Explain & Recommend guidance
+- Existing Blueprints: browse, edit settings, scope and steps, deploy or undeploy with the Blueprints Explorer
 - Multiple Jamf Platform environments
 - Activity history and application logs
 
