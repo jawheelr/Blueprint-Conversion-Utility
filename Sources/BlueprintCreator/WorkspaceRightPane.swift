@@ -68,13 +68,23 @@ struct WorkspaceRightPane: View {
 
             Spacer(minLength: 12)
 
-            Button(primaryTitle) {
-                Task { await model.runTakeoverImport(dryRun: false) }
+            VStack(spacing: 8) {
+                Button(primaryTitle + " and Deploy Now") {
+                    Task { await model.runTakeoverImport(dryRun: false, deploymentIntent: .createAndDeploy) }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .frame(maxWidth: .infinity)
+                .disabled(!canCreate || !canDeploy)
+                .help(deployHelp)
+                Button(primaryTitle + " (Scope Only, Don't Deploy)") {
+                    Task { await model.runTakeoverImport(dryRun: false, deploymentIntent: .createOnly) }
+                }
+                .controlSize(.large)
+                .frame(maxWidth: .infinity)
+                .disabled(!canCreate)
+                .help(primaryHelp)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(!canCreate)
-            .help(primaryHelp)
         }
         .padding(18)
         .frame(minWidth: 300, idealWidth: 370, maxWidth: 560)
@@ -107,6 +117,17 @@ struct WorkspaceRightPane: View {
         return model.takeoverEvaluationState == .supported || model.takeoverEvaluationState == .unsupported || model.takeoverEvaluationState == .notEvaluated
     }
 
+    private var canDeploy: Bool {
+        model.takeoverCapabilities.supportsDeploy && model.evaluateDeploymentSafeguards().canDeploy
+    }
+
+    private var deployHelp: String {
+        if !model.takeoverCapabilities.supportsDeploy { return "The bundled jamf-cli does not offer --deploy." }
+        let safeguards = model.evaluateDeploymentSafeguards()
+        if !safeguards.canDeploy && !safeguards.reasons.isEmpty { return "Deploy is held for review:\n" + safeguards.reasons.joined(separator: "\n") }
+        return "Creates the Blueprint scoped as chosen and requests deployment right away. The Classic source profile remains scoped."
+    }
+
     private var primaryTitle: String {
         if model.dryRunEnabled { return "Turn Off Dry Run to Create" }
         if model.importMode == .convert { return "Create Converted Blueprint" }
@@ -116,7 +137,7 @@ struct WorkspaceRightPane: View {
 
     private var primaryHelp: String {
         if model.dryRunEnabled { return "Dry Run prevents creation. Turn off the switch in the editor header when ready." }
-        return "Runs the explicit, modifying import-profile operation. The Classic source profile remains scoped."
+        return "Creates the Blueprint with its scope but does not deploy it. You can deploy it later from Jamf. The Classic source profile remains scoped."
     }
 
     private var standardPane: some View {
