@@ -198,21 +198,36 @@ struct ContentView: View {
         .padding(18)
     }
 
-    /// Green when the connection passed its test, yellow while it is being checked, red otherwise.
+    /// Green when the connection passed its test, yellow while it is being checked or when access is limited, red otherwise.
     private var statusText: String {
-        model.checkingConnection ? "Checking..." : (model.ready ? "API Ready" : "Check connection")
+        if model.checkingConnection { return "Checking..." }
+        if !model.ready { return "Check connection" }
+        return model.limitedAccessProblem == nil ? "API Ready" : "Limited access"
     }
     private var statusColor: Color {
-        model.checkingConnection ? .yellow : (model.ready ? .green : .red)
+        if model.checkingConnection { return .yellow }
+        if !model.ready { return .red }
+        return model.limitedAccessProblem == nil ? .green : .orange
+    }
+    private var statusIcon: String {
+        if !model.ready { return "xmark.octagon.fill" }
+        return model.limitedAccessProblem == nil ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+    }
+    private var statusHelp: String {
+        if model.checkingConnection { return "Checking the Platform API connection." }
+        if let problem = model.limitedAccessProblem ?? model.connectionProblem { return problem + "\n\nClick to open Connections." }
+        return model.ready ? "The Platform API connection passed its test." : "Open Connections and test the Platform API."
     }
 
     private var statusLabel: some View {
         HStack(spacing: 6) {
             if model.checkingConnection { ProgressView().controlSize(.small) }
-            else { Image(systemName: model.ready ? "checkmark.circle.fill" : "xmark.octagon.fill") }
+            else { Image(systemName: statusIcon) }
             Text(statusText)
         }
         .foregroundStyle(statusColor)
+        .help(statusHelp)
+        .onTapGesture { if !model.checkingConnection && (!model.ready || model.limitedAccessProblem != nil) { model.showConnections = true } }
     }
 
     /// One connection: the status alone. Several: the status on the left and a name menu

@@ -48,6 +48,7 @@ final class AppModel: ObservableObject {
     @Published var showKB = false
     @Published var showAppleSchema = false
     @Published var showExplorer = false
+    @Published var permissionReport: [PermissionCheck] = []
     @Published var explorerBlueprints: [ExplorerBlueprintSummary] = []
     @Published var explorerSelectedID: String?
     @Published var explorerDraft: [String: Any]?
@@ -220,6 +221,7 @@ final class AppModel: ObservableObject {
         platformTested = false
         platformAuthenticationFailed = false
         alert = nil
+        permissionReport = []
         resetExplorer()
     }
 
@@ -278,20 +280,25 @@ final class AppModel: ObservableObject {
         alert = nil
         platformTested = false
         defer { busy = false; checkingConnection = false }
-        do {
-            try await makePlatform().test()
-            try await makeSourceProfiles().test()
+        let usable = await runAccessChecks()
+        if usable {
             platformTested = true
             platformAuthenticationFailed = false
             refreshPlatformCredentialHealth()
+            if permissionReport.contains(where: { $0.capability == .groupsRead && !$0.isOK }) {
+                status = "Connected, but device groups cannot be read."
+                alert = connectionProblem
+                showConnections = true
+                return
+            }
             showConnections = false
             status = "Platform API ready. Loading workspace..."
             await load()
-        } catch {
+        } else {
             status = "Platform API connection test failed."
             platformAuthenticationFailed = true
             refreshPlatformCredentialHealth()
-            alert = error.localizedDescription
+            alert = connectionProblem ?? "The Platform API connection test failed."
             showConnections = true
         }
     }
@@ -313,22 +320,77 @@ final class AppModel: ObservableObject {
         status = "Testing Platform API and Platform profile gateway..."
         alert = nil
         defer { busy = false; checkingConnection = false }
-        do {
-            try await makePlatform().test()
-            try await makeSourceProfiles().test()
+        let usable = await runAccessChecks()
+        if usable {
             platformTested = true
             platformAuthenticationFailed = false
             refreshPlatformCredentialHealth()
-            status = "Platform API connection and configuration-profile access passed."
-            AppLogger.connections.info("Platform API test passed")
-        } catch {
+            if let problem = limitedAccessProblem {
+                status = "Connected with limited access: \(problem)"
+            } else {
+                status = "Platform API connection and configuration-profile access passed."
+            }
+            AppLogger.connections.info("Platform API test passed; limitedAccess=\(self.limitedAccessProblem != nil)")
+        } else {
             platformTested = false
             platformAuthenticationFailed = true
             refreshPlatformCredentialHealth()
-            alert = error.localizedDescription
+            alert = connectionProblem ?? "The Platform API connection test failed."
             status = "Platform API connection test failed."
-            AppLogger.connections.error("\(error.localizedDescription, privacy: .private)")
+            AppLogger.connections.error("Platform API test failed: \(self.connectionProblem ?? "unknown", privacy: .private)")
         }
+    }
+
+    /// Read-only checks of the token, profiles, device groups and Blueprints. Changes nothing in Jamf.
+    /// Returns true when the token and configuration-profile access work, the minimum BCU needs.
+    private func runAccessChecks() async -> Bool {
+        let platform: PlatformClient
+        let profiles: PlatformProfileClient
+        do {
+            platform = try makePlatform()
+            profiles = try makeSourceProfiles()
+        } catch {
+            permissionReport = [PermissionCheck(capability: .token, state: .failed(error.localizedDescription))]
+            return false
+        }
+        var checks = await platform.probeReadAccess()
+        let tokenOK = checks.first { $0.capability == .token }?.isOK == true
+        if tokenOK {
+            checks.append(await profiles.probeProfileAccess())
+        } else {
+            checks.append(PermissionCheck(capability: .profilesRead, state: .notChecked("Needs a working access token first.")))
+        }
+        for capability in PlatformCapability.allCases where capability.checkedWhenUsed {
+            checks.append(PermissionCheck(capability: capability, state: .notChecked("Checked when used. If Jamf refuses it, BCU tells you to grant \(capability.grant).")))
+        }
+        let order = PlatformCapability.allCases
+        permissionReport = checks.sorted { (order.firstIndex(of: $0.capability) ?? 0) < (order.firstIndex(of: $1.capability) ?? 0) }
+        let profilesOK = permissionReport.first { $0.capability == .profilesRead }?.isOK == true
+        return tokenOK && profilesOK
+    }
+
+    /// First problem found by the last test, in plain language.
+    var connectionProblem: String? {
+        permissionReport.compactMap { $0.problem }.first
+    }
+
+    /// A read capability that is missing even though the connection works.
+    var limitedAccessProblem: String? {
+        guard platformTested else { return nil }
+        return permissionReport.first { !$0.isOK && !$0.capability.checkedWhenUsed && $0.problem != nil }?.problem
+    }
+
+    var permissionReportText: String {
+        permissionReport.map { check in
+            let state: String
+            switch check.state {
+            case .ok: state = "OK"
+            case .denied(let issue): state = "Denied: \(issue.details)"
+            case .failed(let text): state = "Failed: \(text)"
+            case .notChecked(let text): state = "Not checked: \(text)"
+            }
+            return "\(check.capability.title): \(state)"
+        }.joined(separator: "\n")
     }
 
     func load() async {

@@ -229,6 +229,17 @@ struct KnowledgeBaseView: View {
                 "Platform groups: /device-groups/v1/device-groups",
                 "Blueprint operations: /blueprints/v1/blueprints"
             ])
+            subsection("Permission checks")
+            paragraph("Test Platform API signs in and then runs read-only checks. The Permissions list in Connections shows each result with what to do about anything missing, and Copy Details copies the report for support. The test never changes anything in Jamf.")
+            bullets([
+                "Access token: Jamf accepted the Client ID and Client Secret. If not, check both, that the API client is enabled, and that it has not expired.",
+                "Configuration profiles (read): needed to list and analyze source profiles. Required for the connection to count as ready.",
+                "Device groups (read): needed to choose a target group. If missing, the header shows Limited access and group selection fails.",
+                "Blueprints (read): needed by the Blueprints Explorer and deployment checks. If missing, the header shows Limited access.",
+                "Create, update, deploy, and unscope permissions cannot be checked without changing something, so they show Checked when used. If Jamf refuses one, BCU names the exact permission to grant.",
+                "The header shows green API Ready, yellow Limited access, or red Check connection. Hover it to see the first problem, and click it to open Connections."
+            ])
+            note("After you change an API client's permissions in Jamf, choose Test Platform API again. A new token is needed for new permissions to apply.")
             subsection("Connection test")
             paragraph("The Platform test validates OAuth plus access to both computer and mobile configuration-profile collections. A successful token alone is not treated as a complete test.")
             subsection("Scope header")

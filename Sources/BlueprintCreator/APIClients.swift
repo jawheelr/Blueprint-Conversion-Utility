@@ -27,13 +27,16 @@ enum HTTPClient {
         return Data(body.utf8)
     }
 
-    static func validate(_ response: URLResponse, data: Data, operation: String) throws {
+    static func validate(_ response: URLResponse, data: Data, operation: String,
+                         path: String = "", method: String = "GET", isTokenRequest: Bool = false) throws {
         guard let http = response as? HTTPURLResponse else {
             throw AppFailure.message("\(operation) returned no HTTP response.")
         }
         guard (200...299).contains(http.statusCode) else {
             let detail = String(data: data, encoding: .utf8) ?? "No response details"
-            throw AppFailure.message("\(operation) failed with HTTP \(http.statusCode): \(detail.prefix(700))")
+            let issue = PlatformIssue.classify(status: http.statusCode, body: detail, path: path, method: method, isTokenRequest: isTokenRequest)
+            AppLogger.errors.error("\(operation, privacy: .public) failed with HTTP \(http.statusCode, privacy: .public); capability=\(issue.capability?.rawValue ?? "none", privacy: .public)")
+            throw AppFailure.platform(issue)
         }
     }
 }
@@ -66,6 +69,17 @@ actor PlatformProfileClient {
         _ = try await authenticate()
         _ = try await get("proclassic/mobiledeviceconfigurationprofiles")
         _ = try await get("proclassic/osxconfigurationprofiles")
+    }
+
+    /// Read-only check of configuration-profile access.
+    func probeProfileAccess() async -> PermissionCheck {
+        do {
+            _ = try await get("proclassic/osxconfigurationprofiles")
+            _ = try await get("proclassic/mobiledeviceconfigurationprofiles")
+            return PermissionCheck(capability: .profilesRead, state: .ok)
+        } catch {
+            return PermissionCheck.result(.profilesRead, error: error)
+        }
     }
 
     func profiles(mobile: Bool) async throws -> [JamfProfile] {
@@ -133,8 +147,10 @@ actor PlatformProfileClient {
             "<\(rootName)>\(modifiedScope)</\(rootName)>"
         let partial = try await putXML(path: path, xml: partialXML)
         guard partial.success else {
+            let issue = PlatformIssue.classify(status: partial.status, body: partial.body, path: path, method: "PUT", isTokenRequest: false)
+            let reason = [401, 403].contains(partial.status) ? issue.message : "HTTP \(partial.status): \(partial.body)"
             throw AppFailure.message(
-                "Jamf Pro could not unscope profile \(id): HTTP \(partial.status): \(partial.body)\n\n" +
+                "Jamf could not unscope profile \(id): \(reason)\n\n" +
                 "The source profile remains scoped. The blueprint is unchanged."
             )
         }
@@ -281,7 +297,7 @@ actor PlatformProfileClient {
         ])
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        try HTTPClient.validate(response, data: data, operation: "Platform API authentication")
+        try HTTPClient.validate(response, data: data, operation: "Platform API authentication", path: "auth/token", method: "POST", isTokenRequest: true)
         let token = try JSONDecoder().decode(OAuthToken.self, from: data)
         accessToken = token.accessToken
         tokenExpiry = Date().addingTimeInterval(TimeInterval((token.expiresIn ?? 900) - 30))
@@ -299,7 +315,7 @@ actor PlatformProfileClient {
         applyScopeHeader(to: &request)
         request.setValue("application/xml", forHTTPHeaderField: "Accept")
         let (data, response) = try await URLSession.shared.data(for: request)
-        try HTTPClient.validate(response, data: data, operation: "Platform profile request")
+        try HTTPClient.validate(response, data: data, operation: "Platform profile request", path: path, method: "GET")
         return data
     }
 }
@@ -325,6 +341,31 @@ actor PlatformClient {
 
     func test() async throws {
         _ = try await authenticate()
+    }
+
+    /// Read-only checks: token, device groups, Blueprints. Nothing is changed in Jamf.
+    func probeReadAccess() async -> [PermissionCheck] {
+        var checks: [PermissionCheck] = []
+        do {
+            _ = try await authenticate()
+            checks.append(PermissionCheck(capability: .token, state: .ok))
+        } catch {
+            checks.append(PermissionCheck.result(.token, error: error))
+            for capability in [PlatformCapability.groupsRead, .blueprintsRead] {
+                checks.append(PermissionCheck(capability: capability, state: .notChecked("Needs a working access token first.")))
+            }
+            return checks
+        }
+        let one = [URLQueryItem(name: "page", value: "0"), URLQueryItem(name: "page-size", value: "1")]
+        do {
+            _ = try await request(path: "device-groups/v1/device-groups", method: "GET", body: nil, queryItems: one)
+            checks.append(PermissionCheck(capability: .groupsRead, state: .ok))
+        } catch { checks.append(PermissionCheck.result(.groupsRead, error: error)) }
+        do {
+            _ = try await request(path: "blueprints/v1/blueprints", method: "GET", body: nil, queryItems: one)
+            checks.append(PermissionCheck(capability: .blueprintsRead, state: .ok))
+        } catch { checks.append(PermissionCheck.result(.blueprintsRead, error: error)) }
+        return checks
     }
 
     struct DeviceGroupPage: Sendable {
@@ -513,7 +554,7 @@ actor PlatformClient {
         ])
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        try HTTPClient.validate(response, data: data, operation: "Platform API authentication")
+        try HTTPClient.validate(response, data: data, operation: "Platform API authentication", path: "auth/token", method: "POST", isTokenRequest: true)
         let token = try JSONDecoder().decode(OAuthToken.self, from: data)
         accessToken = token.accessToken
         tokenExpiry = Date().addingTimeInterval(TimeInterval((token.expiresIn ?? 900) - 30))
@@ -547,7 +588,7 @@ actor PlatformClient {
         }
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        try HTTPClient.validate(response, data: data, operation: "Platform API request")
+        try HTTPClient.validate(response, data: data, operation: "Platform API request", path: path, method: method)
         return data
     }
 }

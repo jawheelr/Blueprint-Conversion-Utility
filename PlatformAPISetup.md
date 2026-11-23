@@ -294,6 +294,8 @@ Only proceed to mutation testing after read-only validation succeeds.
 
 ---
 
+> ✅ **Tip:** BCU's **Test Platform API** button runs read-only permission checks and lists anything missing in **Connections > Permissions**. The create, update, deploy, and unscope permissions are checked when first used.
+
 ## 🧪 8. Validate Permissions by Workflow
 
 ### Configuration Profiles Load

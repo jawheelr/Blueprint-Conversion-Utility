@@ -79,6 +79,17 @@ Enter the requested Jamf environment and credential information in BCU and use t
 
 A successful connection test confirms that BCU can authenticate to the configured environment. Individual operations may still require additional API permissions.
 
+## ✅ Permission Checks
+
+**Test Platform API** signs in and runs read-only checks of configuration profiles, device groups, and Blueprints. The **Permissions** list in Connections shows what passed and, for anything missing, which permission to grant to the API client.
+
+- 🟢 **API Ready**: sign-in and profile access work, and nothing is missing.
+- 🟠 **Limited access**: the connection works, but a read permission such as device groups or Blueprints is missing. Hover the status for details.
+- 🔴 **Check connection**: Jamf did not issue a token or profiles cannot be read.
+- ⏳ Create, update, deploy, and unscope permissions show **Checked when used**, because they cannot be checked without changing something. If Jamf refuses one, BCU names the permission to grant.
+
+The test never changes anything in Jamf.
+
 ## 🔐 Credential Security
 
 Treat Jamf API credentials as privileged administrative credentials.
