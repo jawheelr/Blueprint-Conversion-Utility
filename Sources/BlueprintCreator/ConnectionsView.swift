@@ -208,15 +208,60 @@ struct ConnectionsView: View {
                     .foregroundStyle(.orange)
             }
             LabeledContent("Platform API test") {
-                Text(model.platformTested ? "Passed" : "Not tested")
-                    .foregroundStyle(model.platformTested ? .green : .secondary)
+                Text(model.platformTested ? (model.limitedAccessProblem == nil ? "Passed" : "Limited access") : "Not tested")
+                    .foregroundStyle(model.platformTested ? (model.limitedAccessProblem == nil ? .green : .orange) : .secondary)
             }
+            if !model.permissionReport.isEmpty { permissionsSection }
         }
         .formStyle(.grouped)
         .onChange(of: model.settings.platformURL) { _ in model.platformTested = false }
         .onChange(of: model.settings.platformClientID) { _ in model.platformTested = false }
         .onChange(of: model.platformSecret) { _ in model.platformTested = false }
         .onChange(of: model.settings.environmentID) { _ in model.platformTested = false }
+    }
+
+    /// What the last test found, with the fix for anything missing.
+    private var permissionsSection: some View {
+        Section("Permissions") {
+            ForEach(model.permissionReport) { check in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: icon(for: check)).foregroundStyle(color(for: check))
+                        Text(check.capability.title).bold()
+                        Spacer()
+                        Text(check.capability.usedFor).font(.caption).foregroundStyle(.secondary)
+                    }
+                    if let problem = check.problem {
+                        Text(problem).font(.callout).foregroundStyle(.red).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    } else if case .notChecked(let note) = check.state {
+                        Text(note).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Copy Details") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(model.permissionReportText, forType: .string)
+                }
+            }
+        }
+    }
+
+    private func icon(for check: PermissionCheck) -> String {
+        switch check.state {
+        case .ok: return "checkmark.circle.fill"
+        case .denied, .failed: return "xmark.octagon.fill"
+        case .notChecked: return "circle.dotted"
+        }
+    }
+
+    private func color(for check: PermissionCheck) -> Color {
+        switch check.state {
+        case .ok: return .green
+        case .denied, .failed: return .red
+        case .notChecked: return .secondary
+        }
     }
 
     private var jamfCLIForm: some View {

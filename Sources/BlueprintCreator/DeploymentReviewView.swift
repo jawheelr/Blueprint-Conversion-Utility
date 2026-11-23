@@ -40,7 +40,14 @@ struct DeploymentReviewView: View {
             if model.takeoverVerdict == .notEvaluated || model.takeoverVerdict == .failed {
                 Button("Preview Takeover") { Task { await model.runTakeoverImport(dryRun: true) } }.buttonStyle(.borderedProminent).controlSize(.large)
             } else {
-                Button(primaryTitle) { Task { await model.runTakeoverImport(dryRun: false) } }.buttonStyle(.borderedProminent).controlSize(.large)
+                VStack(spacing: 10) {
+                    Button(primaryTitle + " and Deploy Now") { Task { await model.runTakeoverImport(dryRun: false, deploymentIntent: .createAndDeploy) } }
+                        .buttonStyle(.borderedProminent).controlSize(.large).disabled(!canDeploy || model.busy)
+                        .help(canDeploy ? "Create the Blueprint and request deployment right away." : "Deployment is held for review or unavailable. Use the scope-only option instead.")
+                    Button(primaryTitle + " (Scope Only, Don't Deploy)") { Task { await model.runTakeoverImport(dryRun: false, deploymentIntent: .createOnly) } }
+                        .controlSize(.large).disabled(model.busy)
+                        .help("Create the Blueprint with its scope but leave it undeployed. You can deploy it later from Jamf.")
+                }
             }
             HStack { Spacer(); Button("Cancel") { dismiss() } }
         }.padding(28).frame(width: 780, height: 650)
@@ -68,6 +75,7 @@ struct DeploymentReviewView: View {
         Button { if choice == .createDistributeAndUnscope { model.requestCreateDistributeAndUnscope() } else { Task { await model.performDeployment(choice) } } } label: { Label(title, systemImage: icon).frame(maxWidth: .infinity).padding(.vertical, 6) }
             .buttonStyle(.borderedProminent).controlSize(.large).disabled(!model.conversionReady || model.selectedGroup == nil || model.busy)
     }
+    private var canDeploy: Bool { model.takeoverCapabilities.supportsDeploy && model.evaluateDeploymentSafeguards().canDeploy }
     private var verdictIcon: String { model.takeoverVerdict == .supported ? "checkmark.circle.fill" : "exclamationmark.triangle.fill" }
     private var verdictColor: Color { model.takeoverVerdict == .supported ? .green : .orange }
     private var primaryTitle: String {

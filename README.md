@@ -79,6 +79,17 @@ Enter the requested Jamf environment and credential information in BCU and use t
 
 A successful connection test confirms that BCU can authenticate to the configured environment. Individual operations may still require additional API permissions.
 
+## ✅ Permission Checks
+
+**Test Platform API** signs in and runs read-only checks of configuration profiles, device groups, and Blueprints. The **Permissions** list in Connections shows what passed and, for anything missing, which permission to grant to the API client.
+
+- 🟢 **API Ready**: sign-in and profile access work, and nothing is missing.
+- 🟠 **Limited access**: the connection works, but a read permission such as device groups or Blueprints is missing. Hover the status for details.
+- 🔴 **Check connection**: Jamf did not issue a token or profiles cannot be read.
+- ⏳ Create, update, deploy, and unscope permissions show **Checked when used**, because they cannot be checked without changing something. If Jamf refuses one, BCU names the permission to grant.
+
+The test never changes anything in Jamf.
+
 ## 🔐 Credential Security
 
 Treat Jamf API credentials as privileged administrative credentials.
@@ -228,6 +239,30 @@ For settings that need a decision, choose **Resolve** and pick:
 - 🕒 **Review Later** to leave the finding open
 
 Decisions apply only to the generated Blueprint. The Inspector keeps a count of unresolved recommendations so nothing is forgotten before you execute.
+
+---
+
+# 🗂️ Blueprints Explorer
+
+The **Blueprints Explorer** (the header button, or **Blueprint > Blueprints Explorer**) lets you inspect and edit Blueprints that already exist on the active connection, including components Jamf's own interface cannot edit.
+
+- 📋 Browse and search every Blueprint, with Deployed, Not deployed, and Out of date badges
+- 🌳 Walk a Blueprint's details, scope, steps, and components in an outline
+- 🎛️ Edit component settings with typed controls (toggles, numbers, choices, text, lists) driven by Apple's schema, with descriptions and ranges
+- 🧾 Fall back to a **Raw JSON** tab for any component the schema does not describe
+- 👥 Add or remove scope groups
+- ⚡ Edit activation conditions with the same visual editor used for new Blueprints
+- 🚀 **Deploy**, **Redeploy**, **Undeploy**, or **Save and Deploy**, each with a confirmation and a read-back of the resulting state
+
+Safeguards:
+
+- 💾 Nothing is sent to Jamf until you confirm **Save Changes**, and the confirmation lists what changed.
+- 🛑 If the Blueprint changed in Jamf after you opened it, BCU asks you to reload instead of overwriting it.
+- ✅ BCU checks for an empty name, an empty scope, missing steps or components, and over-long activation conditions before saving.
+- 🔄 A deployed Blueprint shows **Out of date** after an edit until it is deployed again.
+- 🔁 Switching environments closes the Explorer and clears everything it loaded.
+
+> ⚠️ Jamf validates component settings loosely. Review edits carefully, and test on a non-production Blueprint first.
 
 ---
 

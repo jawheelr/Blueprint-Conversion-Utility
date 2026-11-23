@@ -175,8 +175,11 @@ struct OperationResult: Identifiable {
 
 enum AppFailure: LocalizedError {
     case message(String)
+    case platform(PlatformIssue)
     var errorDescription: String? {
-        if case .message(let value) = self { return value }
-        return "Unknown error"
+        switch self {
+        case .message(let value): return value
+        case .platform(let issue): return issue.message
+        }
     }
 }
